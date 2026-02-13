@@ -1,0 +1,84 @@
+from pathlib import Path
+import zipfile
+
+import dashboard
+
+
+def test_parse_message_text_extracts_header_body_and_attachments():
+    text = """=== HEADER ===
+from: alice
+to: bob
+sent_at: 2026-01-01T12:00:00Z
+
+Hello **Bob**!
+=== FOOTER ===
+attachments:
+- /messages/bob/inbox/abc-attachment1.txt
+"""
+
+    details = dashboard.parse_message_text(text)
+
+    assert details.sender == "alice"
+    assert details.recipient == "bob"
+    assert details.sent_at == "2026-01-01T12:00:00Z"
+    assert details.body == "Hello **Bob**!"
+    assert details.attachments == ["/messages/bob/inbox/abc-attachment1.txt"]
+
+
+def test_scan_messages_reads_inbox_and_done_zip(tmp_path, monkeypatch):
+    messages_root = tmp_path / "messages"
+    inbox = messages_root / "bob" / "inbox"
+    done = messages_root / "bob" / "done"
+    inbox.mkdir(parents=True)
+    done.mkdir(parents=True)
+
+    inbox_md = inbox / "2026-01-01T00:00:00Z-1.md"
+    inbox_md.write_text(
+        """=== HEADER ===
+from: alice
+to: bob
+sent_at: 2026-01-01T00:00:00Z
+
+inbox body
+=== FOOTER ===
+reply_url: /messages?from=bob&to=alice
+""",
+        encoding="utf-8",
+    )
+
+    done_zip = done / "2026-01-02T00:00:00Z-1.zip"
+    with zipfile.ZipFile(done_zip, "w") as archive:
+        archive.writestr(
+            "2026-01-02T00:00:00Z-1.md",
+            """=== HEADER ===
+from: carol
+to: bob
+sent_at: 2026-01-02T00:00:00Z
+
+processed body
+=== FOOTER ===
+reply_url: /messages?from=bob&to=carol
+""",
+        )
+
+    monkeypatch.setattr(dashboard, "MESSAGES_ROOT", messages_root)
+
+    records, details = dashboard.scan_messages()
+
+    assert len(records) == 2
+    assert records[0].sender == "carol"
+    assert records[0].is_new is False
+    assert records[1].sender == "alice"
+    assert records[1].is_new is True
+    assert len(details) == 2
+
+
+def test_write_people_normalizes_entries(tmp_path, monkeypatch):
+    people_file = tmp_path / "people.yml"
+    monkeypatch.setattr(dashboard, "PEOPLE_FILE", people_file)
+
+    dashboard.write_people(["Alice", "bob", "alice", " "])
+
+    text = people_file.read_text(encoding="utf-8")
+    assert "- alice" in text
+    assert "- bob" in text
