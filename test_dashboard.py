@@ -82,6 +82,36 @@ def test_write_people_normalizes_entries(tmp_path, monkeypatch):
     assert "- bob" in text
 
 
+def test_resolve_archived_attachment_name_handles_absolute_footer_paths():
+    archive_names = [
+        "2026-01-02T00:00:00Z-1.md",
+        "abc-attachment1.txt",
+    ]
+
+    resolved = dashboard.resolve_archived_attachment_name(
+        archive_names,
+        "/messages/bob/inbox/abc-attachment1.txt",
+        "2026-01-02T00:00:00Z-1.md",
+    )
+
+    assert resolved == "abc-attachment1.txt"
+
+
+def test_resolve_archived_attachment_name_prefers_message_directory_member():
+    archive_names = [
+        "archive/2026-01-02T00:00:00Z-1.md",
+        "archive/abc-attachment1.txt",
+    ]
+
+    resolved = dashboard.resolve_archived_attachment_name(
+        archive_names,
+        "/messages/bob/inbox/abc-attachment1.txt",
+        "archive/2026-01-02T00:00:00Z-1.md",
+    )
+
+    assert resolved == "archive/abc-attachment1.txt"
+
+
 def test_ensure_admin_in_people(tmp_path, monkeypatch):
     people_file = tmp_path / "people.yml"
     people_file.write_text("people:\n- bob\n", encoding="utf-8")

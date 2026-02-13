@@ -121,6 +121,30 @@ def _parse_iso_dt(raw: str) -> str:
         return raw
 
 
+def resolve_archived_attachment_name(archive_names: list[str], attachment: str, message_member: str) -> str | None:
+    archive_set = set(archive_names)
+    attachment_path = Path(attachment)
+
+    candidates = [attachment]
+    candidates.append(attachment.lstrip("/"))
+
+    if "/messages/" in attachment:
+        _, _, suffix = attachment.partition("/messages/")
+        candidates.append(suffix)
+
+    candidates.append(attachment_path.name)
+
+    message_parent = Path(message_member).parent
+    if str(message_parent) not in {"", "."}:
+        candidates.append((message_parent / attachment_path.name).as_posix())
+
+    for candidate in candidates:
+        if candidate in archive_set:
+            return candidate
+
+    return None
+
+
 def scan_messages() -> tuple[list[MessageRecord], dict[str, MessageDetails]]:
     records: list[MessageRecord] = []
     detail_cache: dict[str, MessageDetails] = {}
@@ -244,11 +268,12 @@ def inbox_tab(records: list[MessageRecord], detail_cache: dict[str, MessageDetai
         for attachment in details.attachments:
             filename = Path(attachment).name
             if open_id.startswith("done::"):
-                _, zip_path_raw, _ = open_id.split("::", 2)
+                _, zip_path_raw, message_member = open_id.split("::", 2)
                 with zipfile.ZipFile(zip_path_raw, "r") as archive:
-                    if attachment not in archive.namelist():
+                    resolved_name = resolve_archived_attachment_name(archive.namelist(), attachment, message_member)
+                    if not resolved_name:
                         continue
-                    data = archive.read(attachment)
+                    data = archive.read(resolved_name)
             else:
                 attachment_path = Path(attachment)
                 if not attachment_path.exists():
