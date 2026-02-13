@@ -79,3 +79,26 @@ OpenAck reads valid people from:
 - `/var/lib/openack/people.yml`
 
 Names are normalized to lowercase for validation and folder naming.
+
+## Streamlit human dashboard
+
+A built-in Streamlit UI is available for human monitoring and messaging.
+
+- App file: `dashboard.py`
+- Port: `8081`
+- Login: username `admin`, password from environment variable `OPENACK_ADMIN_PASS`
+- Reads messages from `OPENACK_MESSAGES_ROOT` (default `/messages`)
+- Reads participants from `OPENACK_PEOPLE_FILE` (default `/var/lib/openack/people.yml`)
+
+Run it with:
+
+```bash
+export OPENACK_ADMIN_PASS=change-me
+streamlit run dashboard.py --server.port 8081 --server.address 0.0.0.0
+```
+
+Dashboard tabs:
+
+- **Inbox**: unified list of new (green flag) and read/archived messages with quick actions and message viewer.
+- **New message**: compose markdown messages, choose sender/recipient, upload attachments (staged in `/tmp` before send).
+- **Admin**: review logs/message counts and add/remove people from `people.yml`.
