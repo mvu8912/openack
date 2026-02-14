@@ -121,3 +121,41 @@ def test_ensure_admin_in_people(tmp_path, monkeypatch):
 
     assert "admin" in people
     assert "- admin" in people_file.read_text(encoding="utf-8")
+
+
+def test_filter_and_sort_records_filters_by_recipient_and_sorts_sender():
+    records = [
+        dashboard.MessageRecord("1", "alice/inbox", True, "2026-01-02T00:00:00Z", "zoe", "alice", "z", 0),
+        dashboard.MessageRecord("2", "bob/inbox", True, "2026-01-01T00:00:00Z", "amy", "bob", "a", 1),
+        dashboard.MessageRecord("3", "bob/inbox", False, "2026-01-03T00:00:00Z", "mike", "bob", "m", 2),
+    ]
+
+    filtered = dashboard.filter_and_sort_records(
+        records,
+        recipient_filter="bob",
+        sort_by="sender",
+        sort_ascending=True,
+    )
+
+    assert [row.message_id for row in filtered] == ["2", "3"]
+
+
+def test_delete_selected_messages_removes_inbox_and_done_files(tmp_path):
+    inbox_file = tmp_path / "alice" / "inbox" / "message.md"
+    inbox_file.parent.mkdir(parents=True)
+    inbox_file.write_text("hello", encoding="utf-8")
+
+    done_file = tmp_path / "alice" / "done" / "message.zip"
+    done_file.parent.mkdir(parents=True)
+    done_file.write_bytes(b"zip")
+
+    deleted = dashboard.delete_selected_messages(
+        {
+            f"inbox::{inbox_file}",
+            f"done::{done_file}::message.md",
+        }
+    )
+
+    assert deleted == 2
+    assert not inbox_file.exists()
+    assert not done_file.exists()

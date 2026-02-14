@@ -177,6 +177,45 @@ def scan_messages() -> tuple[list[MessageRecord], dict[str, MessageDetails]]:
     return records, detail_cache
 
 
+def filter_and_sort_records(
+    records: list[MessageRecord],
+    recipient_filter: str = "All recipients",
+    sort_by: str = "sent_at",
+    sort_ascending: bool = False,
+) -> list[MessageRecord]:
+    filtered = [row for row in records if recipient_filter == "All recipients" or row.recipient == recipient_filter]
+
+    key_builders = {
+        "status": lambda row: 0 if row.is_new else 1,
+        "sent_at": lambda row: row.sent_at,
+        "sender": lambda row: row.sender.lower(),
+        "recipient": lambda row: row.recipient.lower(),
+        "preview": lambda row: row.preview.lower(),
+        "attachments": lambda row: row.attachments_count,
+    }
+
+    key_builder = key_builders.get(sort_by, key_builders["sent_at"])
+    return sorted(filtered, key=key_builder, reverse=not sort_ascending)
+
+
+def delete_selected_messages(selected_ids: set[str]) -> int:
+    deleted = 0
+    for message_id in selected_ids:
+        if message_id.startswith("inbox::"):
+            msg_path = Path(message_id.split("::", 1)[1])
+            if msg_path.exists():
+                msg_path.unlink()
+                deleted += 1
+        elif message_id.startswith("done::"):
+            _, zip_path_raw, _ = message_id.split("::", 2)
+            zip_path = Path(zip_path_raw)
+            if zip_path.exists():
+                zip_path.unlink()
+                deleted += 1
+
+    return deleted
+
+
 def require_login() -> None:
     if st.session_state.get("authenticated"):
         return
@@ -201,13 +240,62 @@ def require_login() -> None:
     st.stop()
 
 
-def inbox_tab(records: list[MessageRecord], detail_cache: dict[str, MessageDetails]) -> None:
+def inbox_tab(records: list[MessageRecord], detail_cache: dict[str, MessageDetails], people: list[str]) -> None:
     st.subheader("Inbox")
     if not records:
         st.info("No messages found.")
         return
 
-    for row in records:
+    filter_options = ["All recipients"] + sorted({person for person in people if person != ADMIN_USER})
+    st.session_state.setdefault("inbox_recipient_filter", "All recipients")
+    st.session_state.setdefault("inbox_sort_by", "sent_at")
+    st.session_state.setdefault("inbox_sort_ascending", False)
+
+    if st.session_state.inbox_recipient_filter not in filter_options:
+        st.session_state.inbox_recipient_filter = "All recipients"
+
+    st.selectbox(
+        "Recipient",
+        options=filter_options,
+        key="inbox_recipient_filter",
+        help="Filter inbox rows by recipient. All recipients are shown by default.",
+    )
+
+    header_cols = st.columns([0.6, 0.9, 2.0, 1.2, 1.2, 2.8, 1.0])
+
+    def render_sort_header(label: str, sort_key: str, col_index: int) -> None:
+        is_active = st.session_state.inbox_sort_by == sort_key
+        arrow = " ↑" if is_active and st.session_state.inbox_sort_ascending else " ↓" if is_active else ""
+        if header_cols[col_index].button(f"{label}{arrow}", key=f"sort-{sort_key}", use_container_width=True):
+            if is_active:
+                st.session_state.inbox_sort_ascending = not st.session_state.inbox_sort_ascending
+            else:
+                st.session_state.inbox_sort_by = sort_key
+                st.session_state.inbox_sort_ascending = True
+            st.rerun()
+
+    header_cols[0].write("Select")
+    render_sort_header("Status", "status", 1)
+    render_sort_header("Sent At", "sent_at", 2)
+    render_sort_header("Sender", "sender", 3)
+    render_sort_header("Recipient", "recipient", 4)
+    render_sort_header("Preview", "preview", 5)
+    render_sort_header("Attachments", "attachments", 6)
+
+    visible_records = filter_and_sort_records(
+        records,
+        recipient_filter=st.session_state.inbox_recipient_filter,
+        sort_by=st.session_state.inbox_sort_by,
+        sort_ascending=st.session_state.inbox_sort_ascending,
+    )
+
+    if not visible_records:
+        st.info("No messages match the current filter.")
+        return
+
+    selected_ids = st.session_state.setdefault("selected_ids", set())
+
+    for row in visible_records:
         label = "🟩" if row.is_new else ""
         cols = st.columns([0.6, 0.9, 2.0, 1.2, 1.2, 2.8, 1.0])
         selected = cols[0].checkbox("", key=f"sel-{row.message_id}")
@@ -226,7 +314,6 @@ def inbox_tab(records: list[MessageRecord], detail_cache: dict[str, MessageDetai
         if ops[1].button("Open", key=f"open-{row.message_id}"):
             st.session_state.open_message_id = row.message_id
 
-        selected_ids = st.session_state.setdefault("selected_ids", set())
         if selected:
             selected_ids.add(row.message_id)
         else:
@@ -235,16 +322,12 @@ def inbox_tab(records: list[MessageRecord], detail_cache: dict[str, MessageDetai
         st.divider()
 
     selected_ids = st.session_state.get("selected_ids", set())
-    if len(selected_ids) > 1 and st.button("Delete Selected", type="primary"):
-        deleted = 0
+    if selected_ids and st.button("Delete Selected", type="primary"):
+        deleted = delete_selected_messages(set(selected_ids))
         for message_id in list(selected_ids):
-            if message_id.startswith("inbox::"):
-                msg_path = Path(message_id.split("::", 1)[1])
-                if msg_path.exists():
-                    msg_path.unlink()
-                    deleted += 1
+            st.session_state.pop(f"sel-{message_id}", None)
         st.session_state["selected_ids"] = set()
-        st.success(f"Deleted {deleted} inbox message(s).")
+        st.success(f"Deleted {deleted} message(s).")
         st.rerun()
 
     open_id = st.session_state.get("open_message_id")
@@ -379,7 +462,7 @@ def main() -> None:
 
     tabs = st.tabs(["Inbox", "New message", "Admin"])
     with tabs[0]:
-        inbox_tab(records, detail_cache)
+        inbox_tab(records, detail_cache, people)
     with tabs[1]:
         new_message_tab(people)
     with tabs[2]:
