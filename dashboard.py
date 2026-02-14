@@ -216,6 +216,11 @@ def delete_selected_messages(selected_ids: set[str]) -> int:
     return deleted
 
 
+def selected_ids_visible_in_current_view(selected_ids: set[str], visible_records: list[MessageRecord]) -> set[str]:
+    visible_ids = {row.message_id for row in visible_records}
+    return selected_ids & visible_ids
+
+
 def require_login() -> None:
     if st.session_state.get("authenticated"):
         return
@@ -289,11 +294,13 @@ def inbox_tab(records: list[MessageRecord], detail_cache: dict[str, MessageDetai
         sort_ascending=st.session_state.inbox_sort_ascending,
     )
 
+    selected_ids = st.session_state.setdefault("selected_ids", set())
+    st.session_state["selected_ids"] = selected_ids_visible_in_current_view(selected_ids, visible_records)
+    selected_ids = st.session_state["selected_ids"]
+
     if not visible_records:
         st.info("No messages match the current filter.")
         return
-
-    selected_ids = st.session_state.setdefault("selected_ids", set())
 
     for row in visible_records:
         label = "🟩" if row.is_new else ""

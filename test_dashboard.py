@@ -159,3 +159,14 @@ def test_delete_selected_messages_removes_inbox_and_done_files(tmp_path):
     assert deleted == 2
     assert not inbox_file.exists()
     assert not done_file.exists()
+
+
+def test_selected_ids_visible_in_current_view_excludes_hidden_rows():
+    visible = [
+        dashboard.MessageRecord("1", "alice/inbox", True, "2026-01-01T00:00:00Z", "zoe", "alice", "z", 0),
+        dashboard.MessageRecord("2", "bob/inbox", True, "2026-01-02T00:00:00Z", "amy", "bob", "a", 1),
+    ]
+
+    visible_selected_ids = dashboard.selected_ids_visible_in_current_view({"2", "3"}, visible)
+
+    assert visible_selected_ids == {"2"}
