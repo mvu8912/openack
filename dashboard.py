@@ -9,6 +9,7 @@ from datetime import datetime
 from pathlib import Path
 
 import streamlit as st
+import streamlit.components.v1 as components
 import yaml
 from markdownify import markdownify as html_to_markdown
 from streamlit_quill import st_quill
@@ -222,7 +223,9 @@ def selected_ids_visible_in_current_view(selected_ids: set[str], visible_records
 
 
 def require_login() -> None:
-    if st.session_state.get("authenticated"):
+    query_auth = st.query_params.get("auth")
+    if st.session_state.get("authenticated") or query_auth == "1":
+        st.session_state.authenticated = True
         return
 
     st.markdown("<h2 style='text-align:center'>OpenAck Admin Login</h2>", unsafe_allow_html=True)
@@ -238,6 +241,7 @@ def require_login() -> None:
         if submitted:
             if username == ADMIN_USER and password == expected_password:
                 st.session_state.authenticated = True
+                st.query_params["auth"] = "1"
                 st.rerun()
             else:
                 st.error("Invalid credentials")
@@ -266,26 +270,34 @@ def inbox_tab(records: list[MessageRecord], detail_cache: dict[str, MessageDetai
         help="Filter inbox rows by recipient. All recipients are shown by default.",
     )
 
+    sort_options = {
+        "Status": "status",
+        "Sent At": "sent_at",
+        "Sender": "sender",
+        "Recipient": "recipient",
+        "Preview": "preview",
+        "Attachments": "attachments",
+    }
+    active_sort_label = next((label for label, key in sort_options.items() if key == st.session_state.inbox_sort_by), "Sent At")
+
+    sort_cols = st.columns([2, 2, 4])
+    selected_sort_label = sort_cols[0].selectbox("Sort by", options=list(sort_options), index=list(sort_options).index(active_sort_label))
+    selected_sort_key = sort_options[selected_sort_label]
+    sort_ascending = sort_cols[1].toggle("Ascending", value=st.session_state.inbox_sort_ascending)
+    if selected_sort_key != st.session_state.inbox_sort_by or sort_ascending != st.session_state.inbox_sort_ascending:
+        st.session_state.inbox_sort_by = selected_sort_key
+        st.session_state.inbox_sort_ascending = sort_ascending
+        st.session_state.inbox_page = 1
+        st.rerun()
+
     header_cols = st.columns([0.6, 0.9, 2.0, 1.2, 1.2, 2.8, 1.0])
-
-    def render_sort_header(label: str, sort_key: str, col_index: int) -> None:
-        is_active = st.session_state.inbox_sort_by == sort_key
-        arrow = " ↑" if is_active and st.session_state.inbox_sort_ascending else " ↓" if is_active else ""
-        if header_cols[col_index].button(f"{label}{arrow}", key=f"sort-{sort_key}", use_container_width=True):
-            if is_active:
-                st.session_state.inbox_sort_ascending = not st.session_state.inbox_sort_ascending
-            else:
-                st.session_state.inbox_sort_by = sort_key
-                st.session_state.inbox_sort_ascending = True
-            st.rerun()
-
     header_cols[0].write("Select")
-    render_sort_header("Status", "status", 1)
-    render_sort_header("Sent At", "sent_at", 2)
-    render_sort_header("Sender", "sender", 3)
-    render_sort_header("Recipient", "recipient", 4)
-    render_sort_header("Preview", "preview", 5)
-    render_sort_header("Attachments", "attachments", 6)
+    header_cols[1].write("Status")
+    header_cols[2].write("Sent At")
+    header_cols[3].write("Sender")
+    header_cols[4].write("Recipient")
+    header_cols[5].write("Preview")
+    header_cols[6].write("Attachments")
 
     visible_records = filter_and_sort_records(
         records,
@@ -294,15 +306,31 @@ def inbox_tab(records: list[MessageRecord], detail_cache: dict[str, MessageDetai
         sort_ascending=st.session_state.inbox_sort_ascending,
     )
 
+    st.session_state.setdefault("inbox_page_size", 20)
+    st.session_state.setdefault("inbox_page", 1)
+    total_records = len(visible_records)
+    total_pages = max(1, (total_records + st.session_state.inbox_page_size - 1) // st.session_state.inbox_page_size)
+    st.session_state.inbox_page = min(st.session_state.inbox_page, total_pages)
+
+    pager_cols = st.columns([1.2, 1, 1, 3])
+    pager_cols[0].number_input("Rows per page", min_value=5, max_value=100, step=5, key="inbox_page_size")
+    pager_cols[1].number_input("Page", min_value=1, max_value=total_pages, step=1, key="inbox_page")
+    pager_cols[2].write(f"/ {total_pages}")
+    pager_cols[3].caption(f"Showing {total_records} filtered message(s)")
+
+    start = (st.session_state.inbox_page - 1) * st.session_state.inbox_page_size
+    end = start + st.session_state.inbox_page_size
+    paginated_records = visible_records[start:end]
+
     selected_ids = st.session_state.setdefault("selected_ids", set())
-    st.session_state["selected_ids"] = selected_ids_visible_in_current_view(selected_ids, visible_records)
+    st.session_state["selected_ids"] = selected_ids_visible_in_current_view(selected_ids, paginated_records)
     selected_ids = st.session_state["selected_ids"]
 
-    if not visible_records:
+    if not paginated_records:
         st.info("No messages match the current filter.")
         return
 
-    for row in visible_records:
+    for row in paginated_records:
         label = "🟩" if row.is_new else ""
         cols = st.columns([0.6, 0.9, 2.0, 1.2, 1.2, 2.8, 1.0])
         selected = cols[0].checkbox("", key=f"sel-{row.message_id}")
@@ -391,12 +419,16 @@ def new_message_tab(people: list[str]) -> None:
     sender = col1.selectbox("From", options=people, index=people.index(default_from) if default_from in people else 0)
     recipient = col2.selectbox("To", options=people, index=people.index(default_to) if default_to in people else 0)
 
+    st.session_state.setdefault("compose_editor_seed", 0)
+    editor_key = f"compose_editor_{st.session_state.compose_editor_seed}"
+    uploader_key = f"compose_upload_{st.session_state.compose_editor_seed}"
+
     st.caption("Rich markdown editor (supports selection formatting and keyboard shortcuts like Ctrl+B / Ctrl+I).")
     quill_html = st_quill(
         value=st.session_state.get("compose_html", ""),
         html=True,
         placeholder="Write your message...",
-        key="compose_editor",
+        key=editor_key,
         toolbar=[
             ["bold", "italic", "underline", "strike"],
             [{"header": [1, 2, 3, False]}],
@@ -411,7 +443,12 @@ def new_message_tab(people: list[str]) -> None:
     with st.expander("Markdown preview source", expanded=False):
         st.code(markdown_message or "", language="markdown")
 
-    upload_files = st.file_uploader("Attachments", accept_multiple_files=True, help="Upload files (staged in /tmp before send).")
+    upload_files = st.file_uploader(
+        "Attachments",
+        accept_multiple_files=True,
+        help="Upload files (staged in /tmp before send).",
+        key=uploader_key,
+    )
 
     if st.button("Send", type="primary"):
         staged_files: list[tuple[str, bytes]] = []
@@ -427,7 +464,9 @@ def new_message_tab(people: list[str]) -> None:
             return
 
         st.session_state.compose_html = ""
+        st.session_state.compose_editor_seed += 1
         st.success(f"Message sent at {result['sent_at']} from {sender} to {recipient}")
+        st.rerun()
 
 
 def admin_tab(people: list[str], records: list[MessageRecord]) -> None:
@@ -463,6 +502,19 @@ def main() -> None:
 
     theme_mode = st.sidebar.selectbox("Theme", ["System", "Light", "Dark"], index=0)
     apply_ui_theme(theme_mode)
+
+    auto_refresh_seconds = st.sidebar.slider("Auto-refresh every (seconds)", min_value=0, max_value=120, value=30, step=5)
+    if auto_refresh_seconds > 0:
+        components.html(
+            f"""
+            <script>
+              setTimeout(function () {{
+                window.parent.location.reload();
+              }}, {auto_refresh_seconds * 1000});
+            </script>
+            """,
+            height=0,
+        )
 
     people = ensure_admin_in_people()
     records, detail_cache = scan_messages()
