@@ -170,3 +170,9 @@ def test_selected_ids_visible_in_current_view_excludes_hidden_rows():
     visible_selected_ids = dashboard.selected_ids_visible_in_current_view({"2", "3"}, visible)
 
     assert visible_selected_ids == {"2"}
+
+
+def test_build_pagination_window_compacts_long_page_ranges():
+    pages = dashboard.build_pagination_window(current_page=10, total_pages=20, sibling_count=1)
+
+    assert pages == [1, None, 9, 10, 11, None, 20]

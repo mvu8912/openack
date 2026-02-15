@@ -9,9 +9,9 @@ from datetime import datetime
 from pathlib import Path
 
 import streamlit as st
-import streamlit.components.v1 as components
 import yaml
 from markdownify import markdownify as html_to_markdown
+from streamlit_autorefresh import st_autorefresh
 from streamlit_quill import st_quill
 
 from app import LOG_PATH, MESSAGES_ROOT, PEOPLE_FILE, handle_send_message
@@ -223,6 +223,10 @@ def selected_ids_visible_in_current_view(selected_ids: set[str], visible_records
 
 
 def require_login() -> None:
+    auth_param = st.query_params.get("auth")
+    if auth_param == "1":
+        st.session_state.authenticated = True
+
     if st.session_state.get("authenticated"):
         return
 
@@ -246,8 +250,42 @@ def require_login() -> None:
     st.stop()
 
 
+def build_pagination_window(current_page: int, total_pages: int, sibling_count: int = 2) -> list[int | None]:
+    if total_pages <= 1:
+        return [1]
+
+    pages: list[int | None] = [1]
+    start = max(2, current_page - sibling_count)
+    end = min(total_pages - 1, current_page + sibling_count)
+
+    if start > 2:
+        pages.append(None)
+
+    pages.extend(range(start, end + 1))
+
+    if end < total_pages - 1:
+        pages.append(None)
+
+    pages.append(total_pages)
+    return pages
+
+
 def inbox_tab(records: list[MessageRecord], detail_cache: dict[str, MessageDetails], people: list[str]) -> None:
     st.subheader("Inbox")
+
+    st.markdown(
+        """
+        <style>
+          @media (max-width: 768px) {
+            [data-testid="stHorizontalBlock"] .inbox-header-cell {
+              display: none !important;
+            }
+          }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
     if not records:
         st.info("No messages found.")
         return
@@ -288,13 +326,13 @@ def inbox_tab(records: list[MessageRecord], detail_cache: dict[str, MessageDetai
         st.rerun()
 
     header_cols = st.columns([0.6, 0.9, 2.0, 1.2, 1.2, 2.8, 1.0])
-    header_cols[0].write("Select")
-    header_cols[1].write("Status")
-    header_cols[2].write("Sent At")
-    header_cols[3].write("Sender")
-    header_cols[4].write("Recipient")
-    header_cols[5].write("Preview")
-    header_cols[6].write("Attachments")
+    header_cols[0].markdown("<div class='inbox-header-cell'>Select</div>", unsafe_allow_html=True)
+    header_cols[1].markdown("<div class='inbox-header-cell'>Status</div>", unsafe_allow_html=True)
+    header_cols[2].markdown("<div class='inbox-header-cell'>Sent At</div>", unsafe_allow_html=True)
+    header_cols[3].markdown("<div class='inbox-header-cell'>Sender</div>", unsafe_allow_html=True)
+    header_cols[4].markdown("<div class='inbox-header-cell'>Recipient</div>", unsafe_allow_html=True)
+    header_cols[5].markdown("<div class='inbox-header-cell'>Preview</div>", unsafe_allow_html=True)
+    header_cols[6].markdown("<div class='inbox-header-cell'>Attachments</div>", unsafe_allow_html=True)
 
     visible_records = filter_and_sort_records(
         records,
@@ -303,17 +341,38 @@ def inbox_tab(records: list[MessageRecord], detail_cache: dict[str, MessageDetai
         sort_ascending=st.session_state.inbox_sort_ascending,
     )
 
-    st.session_state.setdefault("inbox_page_size", 20)
+    st.session_state.setdefault("inbox_page_size", 5)
     st.session_state.setdefault("inbox_page", 1)
     total_records = len(visible_records)
     total_pages = max(1, (total_records + st.session_state.inbox_page_size - 1) // st.session_state.inbox_page_size)
     st.session_state.inbox_page = min(st.session_state.inbox_page, total_pages)
 
-    pager_cols = st.columns([1.2, 1, 1, 3])
-    pager_cols[0].number_input("Rows per page", min_value=5, max_value=100, step=5, key="inbox_page_size")
-    pager_cols[1].number_input("Page", min_value=1, max_value=total_pages, step=1, key="inbox_page")
-    pager_cols[2].write(f"/ {total_pages}")
-    pager_cols[3].caption(f"Showing {total_records} filtered message(s)")
+    pager_cols = st.columns([1.2, 4, 1.6])
+    pager_cols[0].selectbox("Rows per page", options=[5, 10, 20, 50, 100], key="inbox_page_size")
+
+    pagination_cols = pager_cols[1].columns(len(build_pagination_window(st.session_state.inbox_page, total_pages)) + 2)
+    if pagination_cols[0].button("<", key="inbox-prev", disabled=st.session_state.inbox_page <= 1):
+        st.session_state.inbox_page = max(1, st.session_state.inbox_page - 1)
+        st.rerun()
+
+    page_tokens = build_pagination_window(st.session_state.inbox_page, total_pages)
+    for index, token in enumerate(page_tokens, start=1):
+        if token is None:
+            pagination_cols[index].markdown("…")
+            continue
+        if token == st.session_state.inbox_page:
+            pagination_cols[index].markdown(f"**({token})**")
+            continue
+        if pagination_cols[index].button(str(token), key=f"inbox-page-{token}"):
+            st.session_state.inbox_page = token
+            st.rerun()
+
+    if pagination_cols[-1].button(">", key="inbox-next", disabled=st.session_state.inbox_page >= total_pages):
+        st.session_state.inbox_page = min(total_pages, st.session_state.inbox_page + 1)
+        st.rerun()
+
+    pager_cols[2].selectbox("Jump to page", options=list(range(1, total_pages + 1)), key="inbox_page")
+    st.caption(f"Showing {total_records} filtered message(s)")
 
     start = (st.session_state.inbox_page - 1) * st.session_state.inbox_page_size
     end = start + st.session_state.inbox_page_size
@@ -502,15 +561,9 @@ def main() -> None:
 
     auto_refresh_seconds = st.sidebar.slider("Auto-refresh every (seconds)", min_value=0, max_value=120, value=30, step=5)
     if auto_refresh_seconds > 0:
-        components.html(
-            f"""
-            <script>
-              setTimeout(function () {{
-                window.parent.location.reload();
-              }}, {auto_refresh_seconds * 1000});
-            </script>
-            """,
-            height=0,
+        st_autorefresh(
+            interval=auto_refresh_seconds * 1000,
+            key="openack-dashboard-autorefresh",
         )
 
     people = ensure_admin_in_people()
