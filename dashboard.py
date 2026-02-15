@@ -223,9 +223,7 @@ def selected_ids_visible_in_current_view(selected_ids: set[str], visible_records
 
 
 def require_login() -> None:
-    query_auth = st.query_params.get("auth")
-    if st.session_state.get("authenticated") or query_auth == "1":
-        st.session_state.authenticated = True
+    if st.session_state.get("authenticated"):
         return
 
     st.markdown("<h2 style='text-align:center'>OpenAck Admin Login</h2>", unsafe_allow_html=True)
@@ -241,7 +239,6 @@ def require_login() -> None:
         if submitted:
             if username == ADMIN_USER and password == expected_password:
                 st.session_state.authenticated = True
-                st.query_params["auth"] = "1"
                 st.rerun()
             else:
                 st.error("Invalid credentials")
