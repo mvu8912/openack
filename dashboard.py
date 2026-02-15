@@ -223,10 +223,6 @@ def selected_ids_visible_in_current_view(selected_ids: set[str], visible_records
 
 
 def require_login() -> None:
-    auth_param = st.query_params.get("auth")
-    if auth_param == "1":
-        st.session_state.authenticated = True
-
     if st.session_state.get("authenticated"):
         return
 

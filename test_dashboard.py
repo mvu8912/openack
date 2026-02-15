@@ -176,3 +176,50 @@ def test_build_pagination_window_compacts_long_page_ranges():
     pages = dashboard.build_pagination_window(current_page=10, total_pages=20, sibling_count=1)
 
     assert pages == [1, None, 9, 10, 11, None, 20]
+
+
+def test_require_login_does_not_allow_query_param_bypass(monkeypatch):
+    class StopCalled(Exception):
+        pass
+
+    class DummyColumn:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    class FakeStreamlit:
+        def __init__(self):
+            self.session_state = {}
+            self.query_params = {"auth": "1"}
+
+        def markdown(self, *args, **kwargs):
+            return None
+
+        def columns(self, _spec):
+            return DummyColumn(), DummyColumn(), DummyColumn()
+
+        def form(self, *_args, **_kwargs):
+            return DummyColumn()
+
+        def text_input(self, _label, **_kwargs):
+            return ""
+
+        def form_submit_button(self, *_args, **_kwargs):
+            return False
+
+        def stop(self):
+            raise StopCalled
+
+    fake_st = FakeStreamlit()
+    monkeypatch.setattr(dashboard, "st", fake_st)
+
+    try:
+        dashboard.require_login()
+    except StopCalled:
+        pass
+    else:
+        raise AssertionError("require_login should stop when not authenticated")
+
+    assert fake_st.session_state.get("authenticated") is not True
