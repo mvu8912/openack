@@ -24,6 +24,42 @@ attachments:
     assert details.attachments == ["/messages/bob/inbox/abc-attachment1.txt"]
 
 
+
+
+def test_parse_message_text_preserves_body_lines_that_look_like_metadata():
+    text = """=== HEADER ===
+from: alice
+to: bob
+sent_at: 2026-01-01T12:00:00Z
+
+from: this line is part of the body
+to: this one too
+
+Regards
+=== FOOTER ===
+reply_url: /messages?from=bob&to=alice
+"""
+
+    details = dashboard.parse_message_text(text)
+
+    assert details.body == "from: this line is part of the body\nto: this one too\n\nRegards"
+
+
+def test_parse_message_text_converts_escaped_newlines_in_body():
+    text = """=== HEADER ===
+from: alice
+to: bob
+sent_at: 2026-01-01T12:00:00Z
+
+First line\\nSecond line\\n- bullet
+=== FOOTER ===
+reply_url: /messages?from=bob&to=alice
+"""
+
+    details = dashboard.parse_message_text(text)
+
+    assert details.body == "First line\nSecond line\n- bullet"
+
 def test_scan_messages_reads_inbox_and_done_zip(tmp_path, monkeypatch):
     messages_root = tmp_path / "messages"
     inbox = messages_root / "bob" / "inbox"

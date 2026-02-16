@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-import re
 import tempfile
 import zipfile
 from dataclasses import dataclass
@@ -87,24 +86,35 @@ def parse_message_text(text: str) -> MessageDetails:
     header_block = text.split(HEADER_MARKER, maxsplit=1)[1] if HEADER_MARKER in text else text
     body_block, footer_block = header_block.split(FOOTER_MARKER, maxsplit=1) if FOOTER_MARKER in header_block else (header_block, "")
 
-    body_lines: list[str] = []
-    for line in body_block.strip("\n").splitlines():
+    body_lines = body_block.strip("\n").splitlines()
+    body_start = 0
+
+    for index, line in enumerate(body_lines):
         stripped = line.strip()
+        if not stripped:
+            body_start = index + 1
+            break
         if stripped.startswith("from:"):
             sender = stripped.split(":", maxsplit=1)[1].strip()
         elif stripped.startswith("to:"):
             recipient = stripped.split(":", maxsplit=1)[1].strip()
         elif stripped.startswith("sent_at:"):
             sent_at = stripped.split(":", maxsplit=1)[1].strip()
-        elif not re.match(r"^(from|to|sent_at):", stripped):
-            body_lines.append(line)
+        else:
+            body_start = index
+            break
+    else:
+        body_start = len(body_lines)
+
+    body = "\n".join(body_lines[body_start:]).strip()
+    body = body.replace("\\r\\n", "\n").replace("\\n", "\n").replace("\\r", "\n")
 
     for line in footer_block.splitlines():
         stripped = line.strip()
         if stripped.startswith("-"):
             attachments.append(stripped[1:].strip())
 
-    return MessageDetails(sent_at=sent_at, sender=sender, recipient=recipient, body="\n".join(body_lines).strip(), attachments=attachments)
+    return MessageDetails(sent_at=sent_at, sender=sender, recipient=recipient, body=body, attachments=attachments)
 
 
 def _message_preview(text: str, limit: int = 80) -> str:
