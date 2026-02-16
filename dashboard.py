@@ -11,7 +11,6 @@ from pathlib import Path
 import streamlit as st
 import yaml
 from markdownify import markdownify as html_to_markdown
-from streamlit_autorefresh import st_autorefresh
 from streamlit_quill import st_quill
 
 from app import LOG_PATH, MESSAGES_ROOT, PEOPLE_FILE, handle_send_message
@@ -555,19 +554,26 @@ def main() -> None:
     theme_mode = st.sidebar.selectbox("Theme", ["System", "Light", "Dark"], index=0)
     apply_ui_theme(theme_mode)
 
-    auto_refresh_seconds = st.sidebar.slider("Auto-refresh every (seconds)", min_value=0, max_value=120, value=30, step=5)
-    if auto_refresh_seconds > 0:
-        st_autorefresh(
-            interval=auto_refresh_seconds * 1000,
-            key="openack-dashboard-autorefresh",
-        )
+    inbox_refresh_seconds = st.sidebar.slider(
+        "Inbox refresh every (seconds)",
+        min_value=0,
+        max_value=120,
+        value=15,
+        step=5,
+        help="Refreshes only the Inbox fragment over Streamlit's websocket without rerunning the entire page.",
+    )
 
     people = ensure_admin_in_people()
-    records, detail_cache = scan_messages()
+    records, _ = scan_messages()
+
+    @st.fragment(run_every=inbox_refresh_seconds if inbox_refresh_seconds > 0 else None)
+    def inbox_fragment() -> None:
+        fresh_records, fresh_detail_cache = scan_messages()
+        inbox_tab(fresh_records, fresh_detail_cache, people)
 
     tabs = st.tabs(["Inbox", "New message", "Admin"])
     with tabs[0]:
-        inbox_tab(records, detail_cache, people)
+        inbox_fragment()
     with tabs[1]:
         new_message_tab(people)
     with tabs[2]:
