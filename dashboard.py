@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import tempfile
 import zipfile
+import json
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -107,7 +108,7 @@ def parse_message_text(text: str) -> MessageDetails:
         body_start = len(body_lines)
 
     body = "\n".join(body_lines[body_start:]).strip()
-    body = body.replace("\\r\\n", "\n").replace("\\n", "\n").replace("\\r", "\n")
+    body = decode_escaped_newlines_if_json_string(body)
 
     for line in footer_block.splitlines():
         stripped = line.strip()
@@ -115,6 +116,21 @@ def parse_message_text(text: str) -> MessageDetails:
             attachments.append(stripped[1:].strip())
 
     return MessageDetails(sent_at=sent_at, sender=sender, recipient=recipient, body=body, attachments=attachments)
+
+
+def decode_escaped_newlines_if_json_string(body: str) -> str:
+    if len(body) < 2 or body[0] != '"' or body[-1] != '"':
+        return body
+
+    try:
+        parsed = json.loads(body)
+    except json.JSONDecodeError:
+        return body
+
+    if not isinstance(parsed, str):
+        return body
+
+    return parsed
 
 
 def _message_preview(text: str, limit: int = 80) -> str:
