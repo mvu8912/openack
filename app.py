@@ -3,14 +3,16 @@ from __future__ import annotations
 import json
 import os
 from collections import defaultdict
+from datetime import datetime, timezone
 from email.parser import BytesParser
 from email.policy import default
-from datetime import datetime, timezone
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 from uuid import uuid4
+
+import yaml
 
 BASE_DIR = Path(__file__).resolve().parent
 MESSAGES_ROOT = Path(os.getenv("OPENACK_MESSAGES_ROOT", "/messages"))
@@ -22,13 +24,9 @@ def load_valid_people() -> set[str]:
     if not PEOPLE_FILE.exists():
         raise ValueError(f"People directory file not found: {PEOPLE_FILE}")
 
-    people: set[str] = set()
-    for raw_line in PEOPLE_FILE.read_text(encoding="utf-8").splitlines():
-        line = raw_line.strip()
-        if line.startswith("-"):
-            name = line[1:].strip().lower()
-            if name:
-                people.add(name)
+    payload = yaml.safe_load(PEOPLE_FILE.read_text(encoding="utf-8")) or {}
+    raw_people = payload.get("people", []) if isinstance(payload, dict) else []
+    people = {str(name).strip().lower() for name in raw_people if str(name).strip()}
 
     if not people:
         raise ValueError(f"No valid people found in {PEOPLE_FILE}")
@@ -165,9 +163,9 @@ def parse_multipart_form_data(content_type: str, body: bytes) -> tuple[str, list
 OPENAPI_SPEC = {
     "openapi": "3.0.3",
     "info": {
-        "title": "OpenAck API",
-        "version": "1.3.0",
-        "description": "File-based message middleware for agent-to-agent communication.",
+        "title": "OpenAck Send API",
+        "version": "1.4.1",
+        "description": "Send API for file-based agent-to-agent communication.",
     },
     "paths": {
         "/messages": {
@@ -229,7 +227,7 @@ SWAGGER_HTML = """<!doctype html>
 <html>
   <head>
     <meta charset=\"utf-8\" />
-    <title>OpenAck API Docs</title>
+    <title>OpenAck Send API Docs</title>
     <link rel=\"stylesheet\" href=\"https://unpkg.com/swagger-ui-dist@5/swagger-ui.css\" />
   </head>
   <body>
@@ -255,7 +253,7 @@ class MessageHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(payload)
 
-    def _send_json(self, code: int, data: dict) -> None:
+    def _send_json(self, code: int, data: object) -> None:
         payload = json.dumps(data).encode("utf-8")
         self.send_response(code)
         self.send_header("Content-Type", "application/json")
@@ -313,7 +311,7 @@ class MessageHandler(BaseHTTPRequestHandler):
 
 def run_server(host: str = "0.0.0.0", port: int = 8080) -> None:
     server = ThreadingHTTPServer((host, port), MessageHandler)
-    print(f"Server listening on http://{host}:{port}")
+    print(f"Send API listening on http://{host}:{port}")
     server.serve_forever()
 
 
