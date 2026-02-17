@@ -4,6 +4,10 @@ import os
 import tempfile
 import zipfile
 import json
+import base64
+import html
+from urllib.parse import quote
+from urllib.request import urlopen
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -18,6 +22,8 @@ from app import LOG_PATH, MESSAGES_ROOT, PEOPLE_FILE, handle_send_message
 HEADER_MARKER = "=== HEADER ==="
 FOOTER_MARKER = "=== FOOTER ==="
 ADMIN_USER = "admin"
+FETCH_API_BASE = os.getenv("OPENACK_FETCH_API", "").strip().rstrip("/")
+AGENT_IDS_FILE = Path(os.getenv("OPENACK_AGENT_IDS_FILE", "/var/lib/openack/agent_ids.yml"))
 
 
 @dataclass
@@ -39,6 +45,7 @@ class MessageDetails:
     recipient: str
     body: str
     attachments: list[str]
+    attachment_data: dict[str, bytes] | None = None
 
 
 def apply_ui_theme(theme_mode: str) -> None:
@@ -115,7 +122,7 @@ def parse_message_text(text: str) -> MessageDetails:
         if stripped.startswith("-"):
             attachments.append(stripped[1:].strip())
 
-    return MessageDetails(sent_at=sent_at, sender=sender, recipient=recipient, body=body, attachments=attachments)
+    return MessageDetails(sent_at=sent_at, sender=sender, recipient=recipient, body=body, attachments=attachments, attachment_data=None)
 
 
 def decode_escaped_newlines_if_json_string(body: str) -> str:
@@ -171,22 +178,110 @@ def resolve_archived_attachment_name(archive_names: list[str], attachment: str, 
     return None
 
 
+def load_agent_id_targets() -> list[tuple[str, str]]:
+    if not AGENT_IDS_FILE.exists():
+        return []
+
+    payload = yaml.safe_load(AGENT_IDS_FILE.read_text(encoding="utf-8")) or {}
+    raw_map = payload.get("id", {}) if isinstance(payload, dict) else {}
+    if not isinstance(raw_map, dict):
+        return []
+
+    targets: list[tuple[str, str]] = []
+    for agent_id, person in raw_map.items():
+        normalized_id = str(agent_id).strip()
+        normalized_person = str(person).strip().lower()
+        if normalized_id and normalized_person:
+            targets.append((normalized_id, normalized_person))
+    return targets
+
+
+def fetch_new_messages_from_api() -> tuple[list[MessageRecord], dict[str, MessageDetails]]:
+    records: list[MessageRecord] = []
+    detail_cache: dict[str, MessageDetails] = {}
+
+    if not FETCH_API_BASE:
+        return records, detail_cache
+
+    for agent_id, person in load_agent_id_targets():
+        url = f"{FETCH_API_BASE}/messages?id={quote(agent_id)}"
+        try:
+            with urlopen(url, timeout=5) as response:  # noqa: S310
+                payload = json.loads(response.read().decode("utf-8"))
+        except Exception:
+            continue
+
+        if not isinstance(payload, list):
+            continue
+
+        for index, item in enumerate(payload):
+            if not isinstance(item, dict):
+                continue
+            attachment_data: dict[str, bytes] = {}
+            attachment_names: list[str] = []
+            for attachment in item.get("attachments", []):
+                if not isinstance(attachment, dict):
+                    continue
+                filename = str(attachment.get("file", "")).strip()
+                encoded = str(attachment.get("content", "")).strip()
+                if not filename:
+                    continue
+                attachment_names.append(filename)
+                if encoded:
+                    try:
+                        attachment_data[filename] = base64.b64decode(encoded)
+                    except Exception:
+                        continue
+
+            details = MessageDetails(
+                sent_at=str(item.get("sent_at", "")),
+                sender=str(item.get("from", "")),
+                recipient=str(item.get("to", person)),
+                body=str(item.get("message", "")),
+                attachments=attachment_names,
+                attachment_data=attachment_data,
+            )
+            message_id = f"fetch::{agent_id}::{index}::{details.sent_at}"
+            detail_cache[message_id] = details
+            records.append(
+                MessageRecord(
+                    message_id,
+                    f"{person}/fetch",
+                    True,
+                    details.sent_at,
+                    details.sender,
+                    details.recipient,
+                    _message_preview(details.body),
+                    len(details.attachments),
+                )
+            )
+
+    return records, detail_cache
+
+
 def scan_messages() -> tuple[list[MessageRecord], dict[str, MessageDetails]]:
     records: list[MessageRecord] = []
     detail_cache: dict[str, MessageDetails] = {}
 
+    if FETCH_API_BASE:
+        fetched_records, fetched_details = fetch_new_messages_from_api()
+        records.extend(fetched_records)
+        detail_cache.update(fetched_details)
+    elif MESSAGES_ROOT.exists():
+        for person_dir in sorted(path for path in MESSAGES_ROOT.iterdir() if path.is_dir()):
+            inbox = person_dir / "inbox"
+            if inbox.exists():
+                for msg_path in sorted(inbox.glob("*.md"), reverse=True):
+                    details = parse_message_text(msg_path.read_text(encoding="utf-8"))
+                    message_id = f"inbox::{msg_path}"
+                    detail_cache[message_id] = details
+                    records.append(MessageRecord(message_id, f"{person_dir.name}/inbox", True, details.sent_at, details.sender, details.recipient, _message_preview(details.body), len(details.attachments)))
+
     if not MESSAGES_ROOT.exists():
+        records.sort(key=lambda row: row.sent_at, reverse=True)
         return records, detail_cache
 
     for person_dir in sorted(path for path in MESSAGES_ROOT.iterdir() if path.is_dir()):
-        inbox = person_dir / "inbox"
-        if inbox.exists():
-            for msg_path in sorted(inbox.glob("*.md"), reverse=True):
-                details = parse_message_text(msg_path.read_text(encoding="utf-8"))
-                message_id = f"inbox::{msg_path}"
-                detail_cache[message_id] = details
-                records.append(MessageRecord(message_id, f"{person_dir.name}/inbox", True, details.sent_at, details.sender, details.recipient, _message_preview(details.body), len(details.attachments)))
-
         done = person_dir / "done"
         if done.exists():
             for zip_path in sorted(done.glob("*.zip"), reverse=True):
@@ -201,6 +296,28 @@ def scan_messages() -> tuple[list[MessageRecord], dict[str, MessageDetails]]:
 
     records.sort(key=lambda row: row.sent_at, reverse=True)
     return records, detail_cache
+
+
+def build_reply_prefill_html(details: MessageDetails) -> str:
+    sent_label = _parse_iso_dt(details.sent_at) if details.sent_at else ""
+    intro = f"On {sent_label}, {details.sender} wrote:".strip().rstrip(":") + ":"
+
+    quoted_lines = [f"> {line}" if line else ">" for line in details.body.splitlines()]
+    if not quoted_lines:
+        quoted_lines = [">"]
+
+    reply_markdown = "\n".join([intro, *quoted_lines])
+    html_lines = [html.escape(line) for line in reply_markdown.splitlines()]
+    return "<p>" + "<br>".join(html_lines) + "</p>"
+
+
+def prime_reply_compose(details: MessageDetails) -> None:
+    st.session_state.compose_to = details.sender
+    st.session_state.compose_from = details.recipient
+    st.session_state.compose_html = build_reply_prefill_html(details)
+    st.session_state.active_tab = "New message"
+    st.session_state.jump_to_new = True
+    st.rerun()
 
 
 def filter_and_sort_records(
@@ -420,9 +537,16 @@ def inbox_tab(records: list[MessageRecord], detail_cache: dict[str, MessageDetai
 
         ops = st.columns([1, 1, 4])
         if ops[0].button("Reply", key=f"reply-{row.message_id}"):
-            st.session_state.compose_to = row.sender
-            st.session_state.compose_from = row.recipient
-            st.session_state.jump_to_new = True
+            reply_details = detail_cache.get(row.message_id)
+            if not reply_details:
+                reply_details = MessageDetails(
+                    sent_at=row.sent_at,
+                    sender=row.sender,
+                    recipient=row.recipient,
+                    body="",
+                    attachments=[],
+                )
+            prime_reply_compose(reply_details)
         if ops[1].button("Open", key=f"open-{row.message_id}"):
             st.session_state.open_message_id = row.message_id
 
@@ -469,6 +593,11 @@ def inbox_tab(records: list[MessageRecord], detail_cache: dict[str, MessageDetai
                     if not resolved_name:
                         continue
                     data = archive.read(resolved_name)
+            elif open_id.startswith("fetch::"):
+                attachment_data = details.attachment_data or {}
+                data = attachment_data.get(filename)
+                if data is None:
+                    continue
             else:
                 attachment_path = Path(attachment)
                 if not attachment_path.exists():
@@ -478,9 +607,7 @@ def inbox_tab(records: list[MessageRecord], detail_cache: dict[str, MessageDetai
             st.download_button(f"Download {filename}", data=data, file_name=filename, key=f"dl-{open_id}-{filename}")
 
     if st.button("Reply from viewer", key="reply-viewer"):
-        st.session_state.compose_to = details.sender
-        st.session_state.compose_from = details.recipient
-        st.session_state.jump_to_new = True
+        prime_reply_compose(details)
 
 
 def new_message_tab(people: list[str]) -> None:
@@ -597,17 +724,23 @@ def main() -> None:
         fresh_records, fresh_detail_cache = scan_messages()
         inbox_tab(fresh_records, fresh_detail_cache, people)
 
-    tabs = st.tabs(["Inbox", "New message", "Admin"])
-    with tabs[0]:
-        inbox_fragment()
-    with tabs[1]:
-        new_message_tab(people)
-    with tabs[2]:
-        admin_tab(people, records)
+    tab_options = ["Inbox", "New message", "Admin"]
+    current_tab = st.session_state.get("active_tab", "Inbox")
+    if current_tab not in tab_options:
+        current_tab = "Inbox"
 
-    if st.session_state.get("jump_to_new"):
-        st.info("Reply pre-filled. Open the New message tab to send.")
-        st.session_state.jump_to_new = False
+    selected_tab = st.radio("Navigation", tab_options, index=tab_options.index(current_tab), horizontal=True)
+    st.session_state.active_tab = selected_tab
+
+    if selected_tab == "Inbox":
+        inbox_fragment()
+    elif selected_tab == "New message":
+        if st.session_state.get("jump_to_new"):
+            st.info("Reply pre-filled from the selected message.")
+            st.session_state.jump_to_new = False
+        new_message_tab(people)
+    else:
+        admin_tab(people, records)
 
 
 if __name__ == "__main__":
