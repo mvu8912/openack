@@ -123,8 +123,9 @@ A built-in Streamlit UI is available for human monitoring and messaging.
 - App file: `dashboard.py`
 - Port: `8081`
 - Login: username `admin`, password from `OPENACK_ADMIN_PASS` (defaults to `password` when unset)
-- Reads messages from `OPENACK_MESSAGES_ROOT` (default `/messages`)
 - Reads participants from `OPENACK_PEOPLE_FILE` (default `/var/lib/openack/people.yml`)
+- New-message fetch path: if `OPENACK_FETCH_API` is set, Inbox "new" messages are pulled from `GET /messages?id=...` using IDs from `OPENACK_AGENT_IDS_FILE`; archived (`done`) messages are still read from `OPENACK_MESSAGES_ROOT` on disk.
+- Fallback mode: when `OPENACK_FETCH_API` is unset, both new (`inbox`) and archived (`done`) messages are read from `OPENACK_MESSAGES_ROOT` on disk.
 
 Run it with:
 
