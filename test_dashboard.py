@@ -1,3 +1,4 @@
+import json
 import zipfile
 
 import dashboard
@@ -230,6 +231,85 @@ def test_build_pagination_window_compacts_long_page_ranges():
 
     assert pages == [1, None, 9, 10, 11, None, 20]
 
+
+
+def test_scan_messages_uses_fetch_api_for_new_and_done_from_filesystem(tmp_path, monkeypatch):
+    messages_root = tmp_path / "messages"
+    done = messages_root / "bob" / "done"
+    done.mkdir(parents=True)
+
+    done_zip = done / "2026-01-02T00:00:00Z-1.zip"
+    with zipfile.ZipFile(done_zip, "w") as archive:
+        archive.writestr(
+            "2026-01-02T00:00:00Z-1.md",
+            """=== HEADER ===
+from: carol
+to: bob
+sent_at: 2026-01-02T00:00:00Z
+
+processed body
+=== FOOTER ===
+reply_url: /messages?from=bob&to=carol
+""",
+        )
+
+    ids_file = tmp_path / "agent_ids.yml"
+    ids_file.write_text("id:\n  AGENT1: bob\n", encoding="utf-8")
+
+    class DummyResponse:
+        def __init__(self, payload: str):
+            self._payload = payload
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def read(self):
+            return self._payload.encode("utf-8")
+
+    payload = [
+        {
+            "from": "alice",
+            "to": "bob",
+            "sent_at": "2026-01-03T00:00:00Z",
+            "message": "fresh body",
+            "attachments": [
+                {"file": "hello.txt", "content": "aGVsbG8="},
+            ],
+        }
+    ]
+
+    def fake_urlopen(url, timeout=0):
+        assert "id=AGENT1" in url
+        assert timeout == 5
+        return DummyResponse(json.dumps(payload))
+
+    monkeypatch.setattr(dashboard, "FETCH_API_BASE", "http://fetch:9090")
+    monkeypatch.setattr(dashboard, "AGENT_IDS_FILE", ids_file)
+    monkeypatch.setattr(dashboard, "MESSAGES_ROOT", messages_root)
+    monkeypatch.setattr(dashboard, "urlopen", fake_urlopen)
+
+    records, details = dashboard.scan_messages()
+
+    assert len(records) == 2
+    assert records[0].location == "bob/fetch"
+    assert records[0].is_new is True
+    assert records[1].location == "bob/done"
+    assert records[1].is_new is False
+
+    fetch_ids = [record.message_id for record in records if record.message_id.startswith("fetch::")]
+    assert len(fetch_ids) == 1
+    fetch_details = details[fetch_ids[0]]
+    assert fetch_details.attachments == ["hello.txt"]
+    assert fetch_details.attachment_data["hello.txt"] == b"hello"
+
+
+def test_load_agent_id_targets_returns_empty_for_missing_file(tmp_path, monkeypatch):
+    monkeypatch.setattr(dashboard, "AGENT_IDS_FILE", tmp_path / "missing.yml")
+
+    assert dashboard.load_agent_id_targets() == []
 
 def test_require_login_does_not_allow_query_param_bypass(monkeypatch):
     class StopCalled(Exception):

@@ -4,6 +4,9 @@ import os
 import tempfile
 import zipfile
 import json
+import base64
+from urllib.parse import quote
+from urllib.request import urlopen
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -18,6 +21,8 @@ from app import LOG_PATH, MESSAGES_ROOT, PEOPLE_FILE, handle_send_message
 HEADER_MARKER = "=== HEADER ==="
 FOOTER_MARKER = "=== FOOTER ==="
 ADMIN_USER = "admin"
+FETCH_API_BASE = os.getenv("OPENACK_FETCH_API", "").strip().rstrip("/")
+AGENT_IDS_FILE = Path(os.getenv("OPENACK_AGENT_IDS_FILE", "/var/lib/openack/agent_ids.yml"))
 
 
 @dataclass
@@ -39,6 +44,7 @@ class MessageDetails:
     recipient: str
     body: str
     attachments: list[str]
+    attachment_data: dict[str, bytes] | None = None
 
 
 def apply_ui_theme(theme_mode: str) -> None:
@@ -115,7 +121,7 @@ def parse_message_text(text: str) -> MessageDetails:
         if stripped.startswith("-"):
             attachments.append(stripped[1:].strip())
 
-    return MessageDetails(sent_at=sent_at, sender=sender, recipient=recipient, body=body, attachments=attachments)
+    return MessageDetails(sent_at=sent_at, sender=sender, recipient=recipient, body=body, attachments=attachments, attachment_data=None)
 
 
 def decode_escaped_newlines_if_json_string(body: str) -> str:
@@ -171,22 +177,110 @@ def resolve_archived_attachment_name(archive_names: list[str], attachment: str, 
     return None
 
 
+def load_agent_id_targets() -> list[tuple[str, str]]:
+    if not AGENT_IDS_FILE.exists():
+        return []
+
+    payload = yaml.safe_load(AGENT_IDS_FILE.read_text(encoding="utf-8")) or {}
+    raw_map = payload.get("id", {}) if isinstance(payload, dict) else {}
+    if not isinstance(raw_map, dict):
+        return []
+
+    targets: list[tuple[str, str]] = []
+    for agent_id, person in raw_map.items():
+        normalized_id = str(agent_id).strip()
+        normalized_person = str(person).strip().lower()
+        if normalized_id and normalized_person:
+            targets.append((normalized_id, normalized_person))
+    return targets
+
+
+def fetch_new_messages_from_api() -> tuple[list[MessageRecord], dict[str, MessageDetails]]:
+    records: list[MessageRecord] = []
+    detail_cache: dict[str, MessageDetails] = {}
+
+    if not FETCH_API_BASE:
+        return records, detail_cache
+
+    for agent_id, person in load_agent_id_targets():
+        url = f"{FETCH_API_BASE}/messages?id={quote(agent_id)}"
+        try:
+            with urlopen(url, timeout=5) as response:  # noqa: S310
+                payload = json.loads(response.read().decode("utf-8"))
+        except Exception:
+            continue
+
+        if not isinstance(payload, list):
+            continue
+
+        for index, item in enumerate(payload):
+            if not isinstance(item, dict):
+                continue
+            attachment_data: dict[str, bytes] = {}
+            attachment_names: list[str] = []
+            for attachment in item.get("attachments", []):
+                if not isinstance(attachment, dict):
+                    continue
+                filename = str(attachment.get("file", "")).strip()
+                encoded = str(attachment.get("content", "")).strip()
+                if not filename:
+                    continue
+                attachment_names.append(filename)
+                if encoded:
+                    try:
+                        attachment_data[filename] = base64.b64decode(encoded)
+                    except Exception:
+                        continue
+
+            details = MessageDetails(
+                sent_at=str(item.get("sent_at", "")),
+                sender=str(item.get("from", "")),
+                recipient=str(item.get("to", person)),
+                body=str(item.get("message", "")),
+                attachments=attachment_names,
+                attachment_data=attachment_data,
+            )
+            message_id = f"fetch::{agent_id}::{index}::{details.sent_at}"
+            detail_cache[message_id] = details
+            records.append(
+                MessageRecord(
+                    message_id,
+                    f"{person}/fetch",
+                    True,
+                    details.sent_at,
+                    details.sender,
+                    details.recipient,
+                    _message_preview(details.body),
+                    len(details.attachments),
+                )
+            )
+
+    return records, detail_cache
+
+
 def scan_messages() -> tuple[list[MessageRecord], dict[str, MessageDetails]]:
     records: list[MessageRecord] = []
     detail_cache: dict[str, MessageDetails] = {}
 
+    if FETCH_API_BASE:
+        fetched_records, fetched_details = fetch_new_messages_from_api()
+        records.extend(fetched_records)
+        detail_cache.update(fetched_details)
+    elif MESSAGES_ROOT.exists():
+        for person_dir in sorted(path for path in MESSAGES_ROOT.iterdir() if path.is_dir()):
+            inbox = person_dir / "inbox"
+            if inbox.exists():
+                for msg_path in sorted(inbox.glob("*.md"), reverse=True):
+                    details = parse_message_text(msg_path.read_text(encoding="utf-8"))
+                    message_id = f"inbox::{msg_path}"
+                    detail_cache[message_id] = details
+                    records.append(MessageRecord(message_id, f"{person_dir.name}/inbox", True, details.sent_at, details.sender, details.recipient, _message_preview(details.body), len(details.attachments)))
+
     if not MESSAGES_ROOT.exists():
+        records.sort(key=lambda row: row.sent_at, reverse=True)
         return records, detail_cache
 
     for person_dir in sorted(path for path in MESSAGES_ROOT.iterdir() if path.is_dir()):
-        inbox = person_dir / "inbox"
-        if inbox.exists():
-            for msg_path in sorted(inbox.glob("*.md"), reverse=True):
-                details = parse_message_text(msg_path.read_text(encoding="utf-8"))
-                message_id = f"inbox::{msg_path}"
-                detail_cache[message_id] = details
-                records.append(MessageRecord(message_id, f"{person_dir.name}/inbox", True, details.sent_at, details.sender, details.recipient, _message_preview(details.body), len(details.attachments)))
-
         done = person_dir / "done"
         if done.exists():
             for zip_path in sorted(done.glob("*.zip"), reverse=True):
@@ -469,6 +563,11 @@ def inbox_tab(records: list[MessageRecord], detail_cache: dict[str, MessageDetai
                     if not resolved_name:
                         continue
                     data = archive.read(resolved_name)
+            elif open_id.startswith("fetch::"):
+                attachment_data = details.attachment_data or {}
+                data = attachment_data.get(filename)
+                if data is None:
+                    continue
             else:
                 attachment_path = Path(attachment)
                 if not attachment_path.exists():
