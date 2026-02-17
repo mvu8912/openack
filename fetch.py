@@ -72,7 +72,7 @@ def _parse_message_file(message_file: Path) -> tuple[dict[str, str], str, list[P
         raise ValueError(f"Malformed message file: {message_file}")
 
     header_start = lines.index("=== HEADER ===") + 1
-    footer_start = lines.index("=== FOOTER ===")
+    footer_start = len(lines) - 1 - lines[::-1].index("=== FOOTER ===")
 
     header: dict[str, str] = {}
     body_start = header_start
