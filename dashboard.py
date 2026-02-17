@@ -258,12 +258,20 @@ def fetch_new_messages_from_api() -> tuple[list[MessageRecord], dict[str, Messag
     return records, detail_cache
 
 
-def scan_messages() -> tuple[list[MessageRecord], dict[str, MessageDetails]]:
+def scan_messages(force_refresh_fetch: bool = False) -> tuple[list[MessageRecord], dict[str, MessageDetails]]:
     records: list[MessageRecord] = []
     detail_cache: dict[str, MessageDetails] = {}
 
     if FETCH_API_BASE:
-        fetched_records, fetched_details = fetch_new_messages_from_api()
+        cache_key = "fetch_api_scan_cache"
+        cached_fetch = st.session_state.get(cache_key)
+
+        if force_refresh_fetch or cached_fetch is None:
+            fetched_records, fetched_details = fetch_new_messages_from_api()
+            st.session_state[cache_key] = (fetched_records, fetched_details)
+        else:
+            fetched_records, fetched_details = cached_fetch
+
         records.extend(fetched_records)
         detail_cache.update(fetched_details)
     elif MESSAGES_ROOT.exists():
@@ -689,11 +697,18 @@ def main() -> None:
     )
 
     people = ensure_admin_in_people()
-    records, _ = scan_messages()
+    records, detail_cache = scan_messages()
+    main_run_id = st.session_state.get("_main_run_id", 0) + 1
+    st.session_state._main_run_id = main_run_id
 
     @st.fragment(run_every=inbox_refresh_seconds if inbox_refresh_seconds > 0 else None)
     def inbox_fragment() -> None:
-        fresh_records, fresh_detail_cache = scan_messages()
+        last_run_id = st.session_state.get("_inbox_fragment_last_main_run")
+        if last_run_id != main_run_id:
+            fresh_records, fresh_detail_cache = records, detail_cache
+            st.session_state._inbox_fragment_last_main_run = main_run_id
+        else:
+            fresh_records, fresh_detail_cache = scan_messages(force_refresh_fetch=True)
         inbox_tab(fresh_records, fresh_detail_cache, people)
 
     tabs = st.tabs(["Inbox", "New message", "Admin"])
