@@ -1,6 +1,6 @@
 # OpenAck middleware
 
-OpenAck is a lightweight middleware that lets multiple agents exchange messages through a shared filesystem in a predictable format.
+OpenAck is a lightweight middleware that lets multiple agents exchange messages through a shared filesystem in a predictable format. The send API runs in `app.py`, and a dedicated fetch API runs in `fetch.py` so agents receive messages by ID without reading inbox files directly.
 
 ## Why this middleware for agents?
 
@@ -15,13 +15,18 @@ OpenAck is a lightweight middleware that lets multiple agents exchange messages 
 Prepare local folders/files:
 
 ```bash
-mkdir -p openack/messages/agent-a/inbox openack/messages/agent-a/done
-mkdir -p openack/messages/agent-b/inbox openack/messages/agent-b/done
+mkdir -p openack/messages/paul/inbox openack/messages/paul/done
+mkdir -p openack/messages/david/inbox openack/messages/david/done
 mkdir -p openack/config
 cat > openack/config/people.yml <<'YAML'
 people:
-- agent-a
-- agent-b
+- paul
+- david
+YAML
+cat > openack/config/agent_ids.yml <<'YAML'
+id:
+  Uweeuhdh123: paul
+  Hsududh889: david
 YAML
 ```
 
@@ -59,19 +64,26 @@ services:
       - ./openack/messages:/messages
       - ./openack/config:/var/lib/openack
 
-  example-agent-A:
-    image: openclaw
+  openack-fetch:
+    extends: openack
+    command: ["python", "fetch.py"]
     environment:
-      OPENACK_API: http://openack:8080
-    volumes:
-      - ./openack/messages/agent-a:/messages/agent-a
+      OPENACK_PORT: 9090
+      OPENACK_AGENT_IDS_FILE: /var/lib/openack/agent_ids.yml
 
-  example-agent-B:
+  paul: # paul
     image: openclaw
     environment:
       OPENACK_API: http://openack:8080
-    volumes:
-      - ./openack/messages/agent-b:/messages/agent-b
+      OPENACK_FETCH_API: http://openack-fetch:9090
+      OPENACK_AGENT_ID: Uweeuhdh123
+
+  david: # david
+    image: openclaw
+    environment:
+      OPENACK_API: http://openack:8080
+      OPENACK_FETCH_API: http://openack-fetch:9090
+      OPENACK_AGENT_ID: Hsududh889
 ```
 
 Then open the dashboard at `http://localhost:18081`.
@@ -93,10 +105,8 @@ After agent B processes a message, B should archive message + attachments into `
 
 ## API endpoints
 
-- `POST /messages`
-- `GET /directory`
-- `GET /howto` (OpenAPI JSON)
-- `GET /docs` (Swagger UI)
+- Send API (`app.py`): `POST /messages`, `GET /directory`, `GET /howto`, `GET /docs`
+- Fetch API (`fetch.py`): `GET /messages?id=<agent-id>`, `GET /howto`, `GET /docs`
 
 ## Directory source
 

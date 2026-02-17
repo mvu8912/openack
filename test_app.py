@@ -2,7 +2,12 @@ from pathlib import Path
 
 import pytest
 
-from app import OPENAPI_SPEC, handle_send_message, load_valid_people, parse_multipart_form_data
+from app import (
+    OPENAPI_SPEC,
+    handle_send_message,
+    load_valid_people,
+    parse_multipart_form_data,
+)
 
 
 def test_load_valid_people_lowercases_names(tmp_path, monkeypatch):

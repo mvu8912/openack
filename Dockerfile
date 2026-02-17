@@ -7,6 +7,7 @@ RUN pip install --no-cache-dir -r /app/requirements.txt
 
 COPY app.py /app/app.py
 COPY dashboard.py /app/dashboard.py
+COPY fetch.py /app/fetch.py
 
 ENV OPENACK_MESSAGES_ROOT=/messages \
     OPENACK_PEOPLE_FILE=/var/lib/openack/people.yml \
