@@ -24,6 +24,7 @@ FOOTER_MARKER = "=== FOOTER ==="
 ADMIN_USER = "admin"
 FETCH_API_BASE = os.getenv("OPENACK_FETCH_API", "").strip().rstrip("/")
 AGENT_IDS_FILE = Path(os.getenv("OPENACK_AGENT_IDS_FILE", "/var/lib/openack/agent_ids.yml"))
+INBOX_SCAN_CACHE_KEY = "_inbox_scan_cache"
 
 
 @dataclass
@@ -296,6 +297,17 @@ def scan_messages() -> tuple[list[MessageRecord], dict[str, MessageDetails]]:
 
     records.sort(key=lambda row: row.sent_at, reverse=True)
     return records, detail_cache
+
+
+def prime_inbox_scan_cache(records: list[MessageRecord], detail_cache: dict[str, MessageDetails]) -> None:
+    st.session_state[INBOX_SCAN_CACHE_KEY] = (records, detail_cache)
+
+
+def consume_inbox_scan_cache() -> tuple[list[MessageRecord], dict[str, MessageDetails]]:
+    cached = st.session_state.pop(INBOX_SCAN_CACHE_KEY, None)
+    if cached is not None:
+        return cached
+    return scan_messages()
 
 
 def build_reply_prefill_html(details: MessageDetails) -> str:
@@ -717,11 +729,12 @@ def main() -> None:
     )
 
     people = ensure_admin_in_people()
-    records, _ = scan_messages()
+    records, detail_cache = scan_messages()
+    prime_inbox_scan_cache(records, detail_cache)
 
     @st.fragment(run_every=inbox_refresh_seconds if inbox_refresh_seconds > 0 else None)
     def inbox_fragment() -> None:
-        fresh_records, fresh_detail_cache = scan_messages()
+        fresh_records, fresh_detail_cache = consume_inbox_scan_cache()
         inbox_tab(fresh_records, fresh_detail_cache, people)
 
     tab_options = ["Inbox", "New message", "Admin"]

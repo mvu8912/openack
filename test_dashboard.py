@@ -328,6 +328,38 @@ def test_load_agent_id_targets_returns_empty_for_missing_file(tmp_path, monkeypa
 
     assert dashboard.load_agent_id_targets() == []
 
+
+def test_consume_inbox_scan_cache_uses_prefetched_results_before_scanning(monkeypatch):
+    cached_records = [dashboard.MessageRecord("1", "bob/fetch", True, "2026-01-01T00:00:00Z", "alice", "bob", "preview", 0)]
+    cached_details = {
+        "1": dashboard.MessageDetails(sent_at="2026-01-01T00:00:00Z", sender="alice", recipient="bob", body="hello", attachments=[])
+    }
+
+    class FakeStreamlit:
+        def __init__(self):
+            self.session_state = {}
+
+    fake_st = FakeStreamlit()
+    monkeypatch.setattr(dashboard, "st", fake_st)
+
+    calls = {"count": 0}
+
+    def fake_scan_messages():
+        calls["count"] += 1
+        return [], {}
+
+    monkeypatch.setattr(dashboard, "scan_messages", fake_scan_messages)
+
+    dashboard.prime_inbox_scan_cache(cached_records, cached_details)
+    first_records, first_details = dashboard.consume_inbox_scan_cache()
+    second_records, second_details = dashboard.consume_inbox_scan_cache()
+
+    assert first_records == cached_records
+    assert first_details == cached_details
+    assert second_records == []
+    assert second_details == {}
+    assert calls["count"] == 1
+
 def test_require_login_does_not_allow_query_param_bypass(monkeypatch):
     class StopCalled(Exception):
         pass
