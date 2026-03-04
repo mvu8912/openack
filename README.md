@@ -45,13 +45,18 @@ services:
     ports:
       - 18081:8081
     command:
-      - streamlit
-      - run
-      - dashboard.py
-      - --server.port
-      - "8081"
-      - --server.address
+      - plackup
+      - -I
+      - lib
+      - -E
+      - deployment
+      - -s
+      - Starman
+      - --host
       - 0.0.0.0
+      - --port
+      - "8081"
+      - app.psgi
 ```
 
 Example compose update:
@@ -116,29 +121,26 @@ OpenAck reads valid people from:
 
 Names are normalized to lowercase for validation and folder naming.
 
-## Streamlit human dashboard
+## Perl Dancer2 human dashboard
 
-A built-in Streamlit UI is available for human monitoring and messaging.
+A built-in Perl dashboard is available for human monitoring and messaging.
 
-- App file: `dashboard.py`
+- Backend: Dancer2 + Template Toolkit
+- Frontend: HTML + CSS + JavaScript
+- App entrypoint: `app.psgi` (`OpenAck::Admin` in `lib/OpenAck/Admin.pm`)
 - Port: `8081`
 - Login: username `admin`, password from `OPENACK_ADMIN_PASS` (defaults to `password` when unset)
 - Reads participants from `OPENACK_PEOPLE_FILE` (default `/var/lib/openack/people.yml`)
-- New-message fetch path: if `OPENACK_FETCH_API` is set, Inbox "new" messages are pulled from `GET /messages?id=...` using IDs from `OPENACK_AGENT_IDS_FILE`; archived (`done`) messages are still read from `OPENACK_MESSAGES_ROOT` on disk.
-- Fallback mode: when `OPENACK_FETCH_API` is unset, both new (`inbox`) and archived (`done`) messages are read from `OPENACK_MESSAGES_ROOT` on disk.
 
 Run it with:
 
 ```bash
 export OPENACK_ADMIN_PASS=change-me
-streamlit run dashboard.py --server.port 8081 --server.address 0.0.0.0
+plackup -I lib -E deployment -s Starman --host 0.0.0.0 --port 8081 app.psgi
 ```
 
-Dashboard tabs:
+Dashboard sections:
 
-- **Inbox**: unified list of new (green flag) and read/archived messages with quick actions and message viewer.
-- **New message**: compose with a rich toolbar editor (selection formatting + keyboard shortcuts like Ctrl+B/Ctrl+I), choose sender/recipient, and upload attachments (staged in `/tmp` before send).
-- **Admin**: review logs/message counts and add/remove people from `people.yml`.
-
-- Theme selector (System/Light/Dark) is available in the sidebar.
-- Streamlit toolbar/deploy button is hidden in the dashboard UI.
+- **New message**: compose and send messages through `POST /messages` with optional attachments.
+- **Inbox & Archive**: view inbox messages and archived records, mark inbox items as read (zip archive), and delete records.
+- **People directory**: add/remove users from `people.yml`.

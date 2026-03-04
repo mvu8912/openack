@@ -1,0 +1,71 @@
+[% layout = 'main' %]
+<header class="topbar">
+  <h1>OpenAck Dashboard</h1>
+  <a href="/logout">Logout</a>
+</header>
+
+<section class="panel">
+  <h2>New message</h2>
+  <form id="send-form" method="post" enctype="multipart/form-data" action="/messages/send">
+    <div class="row">
+      <label>From
+        <select name="from" required>
+          [% FOREACH person IN people %]<option value="[% person %]">[% person %]</option>[% END %]
+        </select>
+      </label>
+      <label>To
+        <select name="to" required>
+          [% FOREACH person IN people %]<option value="[% person %]">[% person %]</option>[% END %]
+        </select>
+      </label>
+    </div>
+    <label>Message
+      <textarea name="message" rows="5" required></textarea>
+    </label>
+    <label>Attachments <input type="file" name="files" multiple></label>
+    <button type="submit">Send</button>
+  </form>
+</section>
+
+<section class="panel">
+  <h2>Inbox & Archive</h2>
+  <table>
+    <thead><tr><th>Status</th><th>Time</th><th>From</th><th>To</th><th>Preview</th><th>Actions</th></tr></thead>
+    <tbody>
+      [% FOREACH message IN messages %]
+      <tr>
+        <td>[% IF message.is_new %]New[% ELSE %]Done[% END %]</td>
+        <td>[% message.sent_at %]</td>
+        <td>[% message.sender %]</td>
+        <td>[% message.recipient %]</td>
+        <td>[% message.preview %]</td>
+        <td>
+          [% IF message.is_new %]
+          <button class="action" data-endpoint="/messages/archive" data-path="[% message.file_path %]">Mark read</button>
+          [% END %]
+          <button class="action" data-endpoint="/messages/delete" data-path="[% message.file_path %]">Delete</button>
+        </td>
+      </tr>
+      [% END %]
+    </tbody>
+  </table>
+</section>
+
+<section class="panel">
+  <h2>People directory</h2>
+  <form method="post" action="/people/add" class="inline-form">
+    <input name="name" placeholder="new username" required>
+    <button type="submit">Add</button>
+  </form>
+  <ul class="chips">
+    [% FOREACH person IN people %]
+    <li>
+      [% person %]
+      <form method="post" action="/people/remove">
+        <input type="hidden" name="name" value="[% person %]">
+        <button type="submit">Remove</button>
+      </form>
+    </li>
+    [% END %]
+  </ul>
+</section>

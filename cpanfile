@@ -1,0 +1,10 @@
+requires 'Dancer2';
+requires 'Template';
+requires 'YAML::XS';
+requires 'JSON::MaybeXS';
+requires 'Path::Tiny';
+requires 'UUID::Tiny';
+requires 'Archive::Zip';
+requires 'LWP::UserAgent';
+requires 'HTTP::Message';
+requires 'HTTP::Request::Common';
