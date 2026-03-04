@@ -1,12 +1,14 @@
 [% layout = 'main' %]
 <div class="login-wrap">
-  <div class="card login-card">
-    <h1 style="margin-top:0">OpenAck Admin</h1>
+  <div class="glass login-card">
+    <div class="pill">OpenAck secure admin access</div>
+    <h1 style="margin-top:10px">Initialize Operator Session</h1>
+    <p class="muted">Authenticate to access inbox intelligence, message routing, and directory controls.</p>
     [% IF error %]<p class="error">[% error %]</p>[% END %]
-    <form method="post" action="/login">
+    <form method="post" action="/login" style="display:grid; gap:12px;">
       <label>Username <input name="username" autocomplete="username" required></label>
       <label>Password <input name="password" type="password" autocomplete="current-password" required></label>
-      <button class="primary" type="submit">Sign in</button>
+      <button class="primary" type="submit">Enter Console</button>
     </form>
   </div>
 </div>
