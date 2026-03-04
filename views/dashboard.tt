@@ -1,8 +1,8 @@
 [% layout = 'main' %]
 <header class="glass topbar">
   <div>
-    <h1>OpenAck // Cyber Operations Dashboard</h1>
-    <div class="muted">Message bus monitoring, compose, and directory management</div>
+    <h1>OpenAck Dashboard</h1>
+    <div class="muted">Futuristic interface for message routing and ops</div>
   </div>
   <div class="actions">
     <span class="pill">admin session</span>
@@ -22,9 +22,9 @@
       <div class="pane-head">
         <h3>Message list</h3>
         <div class="page-ctrl">
-          <button id="prev-page">Prev</button>
+          <button id="prev-page" type="button">Prev</button>
           <span id="page-indicator" class="muted">Page 1</span>
-          <button id="next-page">Next</button>
+          <button id="next-page" type="button">Next</button>
         </div>
       </div>
       <div class="pane-body">
@@ -33,6 +33,7 @@
           <tbody id="message-list">
             [% FOREACH message IN messages %]
             <tr class="msg-row"
+                tabindex="0"
                 data-path="[% message.file_path %]"
                 data-is-new="[% message.is_new %]"
                 data-sender="[% message.sender %]"
@@ -54,9 +55,9 @@
       <div class="pane-head">
         <h3>Message viewer</h3>
         <div class="actions">
-          <button id="reply-btn">Reply</button>
-          <button id="mark-read-btn" class="ok">Mark read</button>
-          <button id="delete-btn" class="danger">Delete</button>
+          <button id="reply-btn" type="button">Reply</button>
+          <button id="mark-read-btn" class="ok" type="button">Mark read</button>
+          <button id="delete-btn" class="danger" type="button">Delete</button>
         </div>
       </div>
       <div class="pane-body">
@@ -86,14 +87,19 @@
           </label>
         </div>
 
-        <div class="toolbar">
-          <button type="button" class="fmt" data-wrap="**">Bold</button>
-          <button type="button" class="fmt" data-wrap="_">Italic</button>
-          <button type="button" class="fmt" data-prefix="- ">Bullet</button>
-          <button type="button" id="clear-compose">Clear</button>
+        <label>Message (rich text editor, sent as Markdown)</label>
+        <div class="editor-wrap">
+          <div class="editor-toolbar">
+            <button type="button" class="fmt" data-cmd="bold">Bold</button>
+            <button type="button" class="fmt" data-cmd="italic">Italic</button>
+            <button type="button" class="fmt" data-cmd="insertUnorderedList">Bullet</button>
+            <button type="button" class="fmt" data-cmd="formatBlock" data-value="blockquote">Quote</button>
+            <button type="button" id="clear-compose">Clear</button>
+          </div>
+          <div id="compose-editor" class="editor" contenteditable="true" data-placeholder="Write your message..."></div>
         </div>
 
-        <textarea id="compose-message" name="message" placeholder="Type your message..." required></textarea>
+        <textarea id="compose-message" name="message" hidden></textarea>
         <label>Attachments <input type="file" name="files" multiple></label>
         <div class="actions">
           <button class="primary" type="submit">Send message</button>
@@ -140,7 +146,7 @@
     $(`#tab-${btn.dataset.tab}`).classList.add('active');
   }));
 
-  // Inbox list + pagination
+  // Inbox list + pagination + row click view
   const rows = $$('#message-list .msg-row');
   const PAGE_SIZE = 12;
   let page = 1;
@@ -182,7 +188,13 @@
     $('#reply-btn').style.display = isNew ? '' : 'none';
   }
 
-  rows.forEach(r => r.addEventListener('click', () => loadMessage(r)));
+  rows.forEach(r => {
+    r.addEventListener('click', () => loadMessage(r));
+    r.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); loadMessage(r); } });
+  });
+
+  const firstVisible = rows.find(r => r.style.display !== 'none');
+  if (firstVisible) loadMessage(firstVisible);
 
   async function postAction(endpoint, payload) {
     const res = await fetch(endpoint, {
@@ -203,37 +215,57 @@
     if (await postAction('/messages/archive', { path:selectedPath })) location.reload();
   });
 
+  // Rich text editor => markdown for send
+  const editor = $('#compose-editor');
+  const hiddenMd = $('#compose-message');
+
+  function htmlToMarkdown(rootEl) {
+    const walk = (node) => {
+      if (node.nodeType === Node.TEXT_NODE) return node.textContent;
+      if (node.nodeType !== Node.ELEMENT_NODE) return '';
+      const tag = node.tagName.toLowerCase();
+      const inner = [...node.childNodes].map(walk).join('');
+      if (tag === 'b' || tag === 'strong') return `**${inner}**`;
+      if (tag === 'i' || tag === 'em') return `_${inner}_`;
+      if (tag === 'blockquote') return inner.split('\n').map(l => `> ${l}`).join('\n');
+      if (tag === 'li') return `- ${inner}\n`;
+      if (tag === 'ul' || tag === 'ol') return `\n${inner}`;
+      if (tag === 'div' || tag === 'p') return `${inner}\n`;
+      if (tag === 'br') return '\n';
+      return inner;
+    };
+    return [...rootEl.childNodes].map(walk).join('').replace(/\n{3,}/g, '\n\n').trim();
+  }
+
+  $$('.fmt').forEach(btn => btn.addEventListener('click', () => {
+    const cmd = btn.dataset.cmd;
+    const value = btn.dataset.value || null;
+    document.execCommand(cmd, false, value);
+    editor.focus();
+  }));
+
+  $('#clear-compose')?.addEventListener('click', () => { editor.innerHTML = ''; editor.focus(); });
+
   $('#reply-btn')?.addEventListener('click', () => {
     if (!selectedMeta) return;
     $('[data-tab="compose"]').click();
     $('#compose-from').value = selectedMeta.recipient || '';
     $('#compose-to').value = selectedMeta.sender || '';
-    const t = $('#compose-message');
-    t.value = `\n\n---\nReplying to: ${selectedMeta.preview || ''}`;
-    autoSize();
-    t.focus();
+    editor.innerHTML = `<p><br></p><p><br></p><blockquote>Replying to: ${selectedMeta.preview || ''}</blockquote>`;
+    editor.focus();
   });
-
-  // Compose form + autosize + simple formatting
-  const textarea = $('#compose-message');
-  const autoSize = () => { textarea.style.height = 'auto'; textarea.style.height = Math.max(220, textarea.scrollHeight) + 'px'; };
-  textarea?.addEventListener('input', autoSize); autoSize();
-
-  $$('.fmt').forEach(btn => btn.addEventListener('click', () => {
-    const t = textarea; const s = t.selectionStart; const e = t.selectionEnd;
-    const selected = t.value.slice(s,e);
-    const wrap = btn.dataset.wrap; const prefix = btn.dataset.prefix;
-    const next = wrap ? `${wrap}${selected || 'text'}${wrap}` : `${prefix}${selected || 'item'}`;
-    t.setRangeText(next, s, e, 'end'); t.focus(); autoSize();
-  }));
-
-  $('#clear-compose')?.addEventListener('click', () => { textarea.value=''; autoSize(); textarea.focus(); });
 
   $('#send-form')?.addEventListener('submit', async (e) => {
     e.preventDefault();
+    hiddenMd.value = htmlToMarkdown(editor);
+    if (!hiddenMd.value.trim()) {
+      $('#send-status').textContent = 'Message cannot be empty';
+      return;
+    }
     $('#send-status').textContent = 'Sending...';
     const res = await fetch('/messages/send', { method:'POST', body:new FormData(e.currentTarget) });
     $('#send-status').textContent = res.ok ? 'Delivered ✓' : 'Send failed';
+    if (res.ok) editor.innerHTML = '';
   });
 
   // Admin actions by ajax
