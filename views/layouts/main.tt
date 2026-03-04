@@ -4,12 +4,43 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>OpenAck Admin Dashboard</title>
-    <link rel="stylesheet" href="/css/dashboard.css">
+    <style>
+      :root { --bg:#0f1420; --panel:#171f2e; --muted:#8ea3c7; --line:#2a3650; --text:#eaf0ff; --accent:#4ea1ff; --ok:#2bc48a; --danger:#ff6b6b; }
+      * { box-sizing: border-box; }
+      body { margin:0; font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif; background:linear-gradient(180deg,#0b111b,#0f1420 40%); color:var(--text); }
+      .container { max-width: 1200px; margin: 0 auto; padding: 24px; }
+      .topbar { display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; }
+      a { color: var(--accent); text-decoration: none; }
+      .card { background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:16px; }
+      .tabs { display:flex; gap:8px; margin-bottom:16px; flex-wrap:wrap; }
+      .tab-btn { border:1px solid var(--line); background:#10192a; color:var(--text); padding:8px 12px; border-radius:10px; cursor:pointer; }
+      .tab-btn.active { background:var(--accent); color:#041225; border-color:var(--accent); font-weight:600; }
+      .tab-pane { display:none; }
+      .tab-pane.active { display:block; }
+      .row { display:grid; grid-template-columns: 1fr 1fr; gap:12px; }
+      label { display:flex; flex-direction:column; gap:6px; font-size:14px; color:var(--muted); }
+      input,select,textarea,button { font:inherit; }
+      input,select,textarea { width:100%; background:#0f1727; color:var(--text); border:1px solid var(--line); border-radius:10px; padding:10px; }
+      textarea { min-height:180px; resize:vertical; }
+      button { border:1px solid var(--line); background:#13203a; color:var(--text); padding:9px 12px; border-radius:10px; cursor:pointer; }
+      button.primary { background:var(--accent); color:#041225; border-color:var(--accent); font-weight:600; }
+      button.ok { background:#133329; border-color:#295746; }
+      button.danger { background:#3b1b23; border-color:#603340; }
+      .toolbar { display:flex; gap:6px; margin-bottom:8px; }
+      table { width:100%; border-collapse: collapse; font-size:14px; }
+      th, td { text-align:left; padding:10px 8px; border-bottom:1px solid var(--line); vertical-align:top; }
+      .actions { display:flex; gap:6px; flex-wrap:wrap; }
+      .preview { color:#c8d6f1; max-width:420px; }
+      .muted { color:var(--muted); }
+      .login-wrap { min-height:100vh; display:grid; place-items:center; padding:24px; }
+      .login-card { width:min(420px,100%); }
+      .error { color:#ff9090; }
+      .chips { display:flex; flex-wrap:wrap; gap:8px; padding:0; list-style:none; }
+      .chips li { background:#0f1727; border:1px solid var(--line); border-radius:999px; padding:4px 8px; display:flex; align-items:center; gap:8px; }
+      .msg-view { white-space:pre-wrap; background:#0f1727; border:1px solid var(--line); border-radius:10px; padding:12px; min-height:120px; }
+    </style>
   </head>
   <body>
-    <div class="container">
-      [% content %]
-    </div>
-    <script src="/js/dashboard.js"></script>
+    <div class="container">[% content %]</div>
   </body>
 </html>

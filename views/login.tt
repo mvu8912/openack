@@ -1,10 +1,12 @@
 [% layout = 'main' %]
-<div class="login-card">
-  <h1>OpenAck Admin</h1>
-  [% IF error %]<p class="error">[% error %]</p>[% END %]
-  <form method="post" action="/login">
-    <label>Username <input name="username" required></label>
-    <label>Password <input name="password" type="password" required></label>
-    <button type="submit">Sign in</button>
-  </form>
+<div class="login-wrap">
+  <div class="card login-card">
+    <h1 style="margin-top:0">OpenAck Admin</h1>
+    [% IF error %]<p class="error">[% error %]</p>[% END %]
+    <form method="post" action="/login">
+      <label>Username <input name="username" autocomplete="username" required></label>
+      <label>Password <input name="password" type="password" autocomplete="current-password" required></label>
+      <button class="primary" type="submit">Sign in</button>
+    </form>
+  </div>
 </div>

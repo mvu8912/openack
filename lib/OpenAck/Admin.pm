@@ -136,6 +136,46 @@ sub _send_message {
     return JSON::MaybeXS::decode_json($res->decoded_content);
 }
 
+
+sub _safe_path_under_messages_root {
+    my ($raw_path) = @_;
+    return if !$raw_path;
+    my $candidate = path($raw_path)->absolute;
+    my $root = $MESSAGES_ROOT->absolute;
+    return if index($candidate->stringify, $root->stringify) != 0;
+    return $candidate;
+}
+
+sub _parse_zip_message {
+    my ($zip_path) = @_;
+    my $zip = Archive::Zip->new();
+    $zip->read($zip_path->stringify) == AZ_OK or die "Unable to read archive";
+    my ($msg_member) = grep { $_->fileName =~ /\.md$/ } $zip->members;
+    return {
+        sent_at => basename($zip_path),
+        sender => '-',
+        recipient => path($zip_path)->parent->parent->basename,
+        body => '(archived message)',
+    } if !$msg_member;
+
+    my $content = $msg_member->contents;
+    my ($header) = $content =~ /=== HEADER ===\n(.*?)\n\n/s;
+    my %meta;
+    if ($header) {
+        for my $line (split /\n/, $header) {
+            my ($k, $v) = split /:\s*/, $line, 2;
+            $meta{$k} = $v if defined $k && defined $v;
+        }
+    }
+    my ($body) = $content =~ /=== HEADER ===\n.*?\n\n(.*?)\n=== FOOTER ===/s;
+    return {
+        sent_at => ($meta{sent_at} // basename($zip_path)),
+        sender => ($meta{from} // '-'),
+        recipient => ($meta{to} // path($zip_path)->parent->parent->basename),
+        body => ($body // '(archived message)'),
+    };
+}
+
 sub _archive_inbox_message {
     my ($message_path) = @_;
     return unless -f $message_path;
@@ -198,6 +238,30 @@ get '/dashboard' => sub {
         messages => $messages,
         people => $people,
     };
+};
+
+
+get '/messages/view' => sub {
+    _require_auth() or return;
+    my $raw = query_parameters->get('path') // '';
+    my $path = _safe_path_under_messages_root($raw);
+    return send_error('Invalid path', 400) if !$path || !-f $path;
+
+    my $details;
+    if ($path =~ /\.md$/) {
+        $details = _parse_message_file($path);
+    } elsif ($path =~ /\.zip$/) {
+        $details = _parse_zip_message($path);
+    } else {
+        return send_error('Unsupported file', 400);
+    }
+
+    return to_json({
+        sent_at => $details->{sent_at} // '',
+        sender => $details->{sender} // '-',
+        recipient => $details->{recipient} // '',
+        body => $details->{body} // '',
+    });
 };
 
 post '/messages/send' => sub {

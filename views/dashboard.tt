@@ -1,71 +1,165 @@
 [% layout = 'main' %]
 <header class="topbar">
-  <h1>OpenAck Dashboard</h1>
+  <div>
+    <h1 style="margin:0">OpenAck Dashboard</h1>
+    <div class="muted">Admin console</div>
+  </div>
   <a href="/logout">Logout</a>
 </header>
 
-<section class="panel">
-  <h2>New message</h2>
-  <form id="send-form" method="post" enctype="multipart/form-data" action="/messages/send">
-    <div class="row">
-      <label>From
-        <select name="from" required>
-          [% FOREACH person IN people %]<option value="[% person %]">[% person %]</option>[% END %]
-        </select>
-      </label>
-      <label>To
-        <select name="to" required>
-          [% FOREACH person IN people %]<option value="[% person %]">[% person %]</option>[% END %]
-        </select>
-      </label>
-    </div>
-    <label>Message
-      <textarea name="message" rows="5" required></textarea>
-    </label>
-    <label>Attachments <input type="file" name="files" multiple></label>
-    <button type="submit">Send</button>
-  </form>
-</section>
+<div class="tabs">
+  <button class="tab-btn active" data-tab="inbox">Inbox</button>
+  <button class="tab-btn" data-tab="compose">New message</button>
+  <button class="tab-btn" data-tab="admin">Admin</button>
+</div>
 
-<section class="panel">
+<section id="tab-inbox" class="card tab-pane active">
   <h2>Inbox & Archive</h2>
   <table>
     <thead><tr><th>Status</th><th>Time</th><th>From</th><th>To</th><th>Preview</th><th>Actions</th></tr></thead>
     <tbody>
       [% FOREACH message IN messages %]
       <tr>
-        <td>[% IF message.is_new %]New[% ELSE %]Done[% END %]</td>
+        <td>[% IF message.is_new %]<span style="color:#66e5b1">New</span>[% ELSE %]<span class="muted">Done</span>[% END %]</td>
         <td>[% message.sent_at %]</td>
         <td>[% message.sender %]</td>
         <td>[% message.recipient %]</td>
-        <td>[% message.preview %]</td>
-        <td>
+        <td class="preview">[% message.preview %]</td>
+        <td class="actions">
+          <button class="msg-view-btn" data-path="[% message.file_path %]">View</button>
           [% IF message.is_new %]
-          <button class="action" data-endpoint="/messages/archive" data-path="[% message.file_path %]">Mark read</button>
+          <button class="msg-reply-btn" data-from="[% message.recipient %]" data-to="[% message.sender %]" data-preview="[% message.preview %]">Reply</button>
+          <button class="msg-action ok" data-endpoint="/messages/archive" data-path="[% message.file_path %]">Mark read</button>
           [% END %]
-          <button class="action" data-endpoint="/messages/delete" data-path="[% message.file_path %]">Delete</button>
+          <button class="msg-action danger" data-endpoint="/messages/delete" data-path="[% message.file_path %]">Delete</button>
         </td>
       </tr>
       [% END %]
     </tbody>
   </table>
+  <div id="message-viewer" style="display:none; margin-top:16px;">
+    <h3 style="margin-bottom:6px">Message view</h3>
+    <div id="message-meta" class="muted" style="margin-bottom:8px"></div>
+    <div id="message-body" class="msg-view"></div>
+  </div>
 </section>
 
-<section class="panel">
-  <h2>People directory</h2>
-  <form method="post" action="/people/add" class="inline-form">
-    <input name="name" placeholder="new username" required>
-    <button type="submit">Add</button>
+<section id="tab-compose" class="card tab-pane">
+  <h2>New message</h2>
+  <form id="send-form" method="post" enctype="multipart/form-data" action="/messages/send">
+    <div class="row">
+      <label>From
+        <select id="compose-from" name="from" required>
+          [% FOREACH person IN people %]<option value="[% person %]">[% person %]</option>[% END %]
+        </select>
+      </label>
+      <label>To
+        <select id="compose-to" name="to" required>
+          [% FOREACH person IN people %]<option value="[% person %]">[% person %]</option>[% END %]
+        </select>
+      </label>
+    </div>
+    <label>Message</label>
+    <div class="toolbar">
+      <button type="button" class="fmt" data-wrap="**">Bold</button>
+      <button type="button" class="fmt" data-wrap="_">Italic</button>
+      <button type="button" class="fmt" data-prefix="- ">Bullet</button>
+    </div>
+    <textarea id="compose-message" name="message" required placeholder="Write your message..."></textarea>
+    <label style="margin-top:10px">Attachments <input type="file" name="files" multiple></label>
+    <button class="primary" type="submit">Send</button>
   </form>
-  <ul class="chips">
+</section>
+
+<section id="tab-admin" class="card tab-pane">
+  <h2>People directory</h2>
+  <form method="post" action="/people/add" style="display:flex; gap:8px; max-width:420px;">
+    <input name="name" placeholder="new username" required>
+    <button class="primary" type="submit">Add</button>
+  </form>
+  <ul class="chips" style="margin-top:12px;">
     [% FOREACH person IN people %]
     <li>
       [% person %]
       <form method="post" action="/people/remove">
         <input type="hidden" name="name" value="[% person %]">
-        <button type="submit">Remove</button>
+        <button class="danger" type="submit">Remove</button>
       </form>
     </li>
     [% END %]
   </ul>
 </section>
+
+<script>
+  const tabButtons = document.querySelectorAll('.tab-btn');
+  const panes = document.querySelectorAll('.tab-pane');
+  tabButtons.forEach(btn => btn.addEventListener('click', () => {
+    tabButtons.forEach(b => b.classList.remove('active'));
+    panes.forEach(p => p.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById(`tab-${btn.dataset.tab}`).classList.add('active');
+  }));
+
+  document.querySelectorAll('.msg-action').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const endpoint = btn.dataset.endpoint;
+      const path = btn.dataset.path;
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({ path }),
+      });
+      if (res.ok) location.reload();
+    });
+  });
+
+  document.querySelectorAll('.msg-view-btn').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const path = btn.dataset.path;
+      const res = await fetch(`/messages/view?path=${encodeURIComponent(path)}`);
+      if (!res.ok) return alert('Unable to load message');
+      const payload = await res.json();
+      document.getElementById('message-meta').textContent = `From ${payload.sender} to ${payload.recipient} at ${payload.sent_at}`;
+      document.getElementById('message-body').textContent = payload.body || '(no body)';
+      document.getElementById('message-viewer').style.display = 'block';
+    });
+  });
+
+  document.querySelectorAll('.msg-reply-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      document.querySelector('[data-tab="compose"]').click();
+      document.getElementById('compose-from').value = btn.dataset.from;
+      document.getElementById('compose-to').value = btn.dataset.to;
+      const t = document.getElementById('compose-message');
+      t.value = `\n\n---\nReplying to: ${btn.dataset.preview}`;
+      t.focus();
+      t.style.height = 'auto';
+      t.style.height = t.scrollHeight + 'px';
+    });
+  });
+
+  const form = document.getElementById('send-form');
+  form?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const res = await fetch(form.action, { method: 'POST', body: new FormData(form) });
+    if (!res.ok) return alert('Failed to send message');
+    form.reset();
+    alert('Message sent');
+  });
+
+  const textarea = document.getElementById('compose-message');
+  const autoSize = () => { textarea.style.height='auto'; textarea.style.height = Math.max(180, textarea.scrollHeight) + 'px'; };
+  textarea?.addEventListener('input', autoSize); autoSize();
+
+  document.querySelectorAll('.fmt').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const t = textarea; const start = t.selectionStart; const end = t.selectionEnd;
+      const selected = t.value.slice(start, end);
+      const wrap = btn.dataset.wrap; const prefix = btn.dataset.prefix;
+      let next = selected;
+      if (wrap) next = `${wrap}${selected || 'text'}${wrap}`;
+      if (prefix) next = `${prefix}${selected || 'item'}`;
+      t.setRangeText(next, start, end, 'end'); t.focus(); autoSize();
+    });
+  });
+</script>
