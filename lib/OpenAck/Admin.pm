@@ -5,7 +5,7 @@ use warnings;
 
 use Dancer2;
 use YAML::XS qw(LoadFile DumpFile);
-use JSON::MaybeXS qw(decode_json);
+use JSON::MaybeXS ();
 use File::Path qw(make_path);
 use File::Basename qw(basename);
 use Path::Tiny;
@@ -15,8 +15,13 @@ use Archive::Zip qw(:ERROR_CODES :CONSTANTS);
 use HTTP::Request::Common qw(POST);
 use LWP::UserAgent;
 
-set session => 'Simple';
-set template => 'template_toolkit';
+my $APP_ROOT = path(__FILE__)->parent->parent->parent->absolute;
+
+set appdir     => $APP_ROOT->stringify;
+set views      => $APP_ROOT->child('views')->stringify;
+set public_dir => $APP_ROOT->child('public')->stringify;
+set session    => 'Simple';
+set template   => 'template_toolkit';
 
 my $MESSAGES_ROOT = path($ENV{OPENACK_MESSAGES_ROOT} // '/messages');
 my $PEOPLE_FILE = path($ENV{OPENACK_PEOPLE_FILE} // '/var/lib/openack/people.yml');
@@ -128,7 +133,7 @@ sub _send_message {
     my $req = POST($url, Content_Type => 'form-data', Content => \@content);
     my $res = $ua->request($req);
     die "Message send failed: " . $res->status_line unless $res->is_success;
-    return decode_json($res->decoded_content);
+    return JSON::MaybeXS::decode_json($res->decoded_content);
 }
 
 sub _archive_inbox_message {

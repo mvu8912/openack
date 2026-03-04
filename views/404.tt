@@ -1,0 +1,6 @@
+[% layout = 'main' %]
+<section class="panel">
+  <h2>Not found</h2>
+  <p>The requested page does not exist.</p>
+  <a href="/dashboard">Back to dashboard</a>
+</section>
