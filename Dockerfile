@@ -18,13 +18,13 @@ COPY app.psgi /app/app.psgi
 COPY lib /app/lib
 COPY views /app/views
 COPY public /app/public
-COPY dashboard.py /app/dashboard.py
 
 ENV OPENACK_MESSAGES_ROOT=/messages \
     OPENACK_PEOPLE_FILE=/var/lib/openack/people.yml \
     OPENACK_PORT=8080 \
+    OPENACK_ADMIN_PORT=8081 \
     PYTHONUNBUFFERED=1
 
-EXPOSE 8080
+EXPOSE 8080 8081
 
-CMD ["python", "app.py"]
+CMD ["plackup", "-I", "lib", "-E", "deployment", "-s", "Starman", "--host", "0.0.0.0", "--port", "8081", "app.psgi"]

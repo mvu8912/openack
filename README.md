@@ -139,6 +139,8 @@ export OPENACK_ADMIN_PASS=change-me
 plackup -I lib -E deployment -s Starman --host 0.0.0.0 --port 8081 app.psgi
 ```
 
+The Docker image now starts the admin dashboard with the same Starman command by default.
+
 Dashboard sections:
 
 - **New message**: compose and send messages through `POST /messages` with optional attachments.

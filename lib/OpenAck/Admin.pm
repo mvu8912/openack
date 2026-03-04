@@ -7,9 +7,7 @@ use Dancer2;
 use YAML::XS qw(LoadFile DumpFile);
 use JSON::MaybeXS qw(decode_json);
 use File::Path qw(make_path);
-use File::Copy qw(move);
 use File::Basename qw(basename);
-use File::Spec;
 use Path::Tiny;
 use UUID::Tiny ':std';
 use POSIX qw(strftime);
@@ -22,7 +20,6 @@ set template => 'template_toolkit';
 
 my $MESSAGES_ROOT = path($ENV{OPENACK_MESSAGES_ROOT} // '/messages');
 my $PEOPLE_FILE = path($ENV{OPENACK_PEOPLE_FILE} // '/var/lib/openack/people.yml');
-my $LOG_PATH = path($ENV{OPENACK_LOG_PATH} // File::Spec->catfile(path('.')->absolute, 'transactions.log'));
 my $OPENACK_API = $ENV{OPENACK_API} // 'http://127.0.0.1:8080';
 
 sub _admin_password { return $ENV{OPENACK_ADMIN_PASS} // 'password' }

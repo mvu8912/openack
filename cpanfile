@@ -8,3 +8,4 @@ requires 'Archive::Zip';
 requires 'LWP::UserAgent';
 requires 'HTTP::Message';
 requires 'HTTP::Request::Common';
+requires 'Starman';
