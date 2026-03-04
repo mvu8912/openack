@@ -1,0 +1,288 @@
+[% layout = 'main' %]
+<header class="glass topbar">
+  <div>
+    <h1>OpenAck Dashboard</h1>
+    <div class="muted">Futuristic interface for message routing and ops</div>
+  </div>
+  <div class="actions">
+    <span class="pill">admin session</span>
+    <a href="/logout">Logout</a>
+  </div>
+</header>
+
+<div class="tabs">
+  <button class="tab-btn active" data-tab="inbox">Inbox</button>
+  <button class="tab-btn" data-tab="compose">Compose</button>
+  <button class="tab-btn" data-tab="admin">Directory</button>
+</div>
+
+<section id="tab-inbox" class="tab-pane active">
+  <div class="console">
+    <div class="glass pane">
+      <div class="pane-head">
+        <h3>Message list</h3>
+        <div class="page-ctrl">
+          <button id="prev-page" type="button">Prev</button>
+          <span id="page-indicator" class="muted">Page 1</span>
+          <button id="next-page" type="button">Next</button>
+        </div>
+      </div>
+      <div class="pane-body">
+        <table>
+          <thead><tr><th>Status</th><th>Time</th><th>From</th><th>To</th><th>Preview</th></tr></thead>
+          <tbody id="message-list">
+            [% FOREACH message IN messages %]
+            <tr class="msg-row"
+                tabindex="0"
+                data-path="[% message.file_path %]"
+                data-is-new="[% message.is_new %]"
+                data-sender="[% message.sender %]"
+                data-recipient="[% message.recipient %]"
+                data-preview="[% message.preview %]">
+              <td>[% IF message.is_new %]<span style="color:#31f29b">New</span>[% ELSE %]<span class="muted">Done</span>[% END %]</td>
+              <td>[% message.sent_at %]</td>
+              <td>[% message.sender %]</td>
+              <td>[% message.recipient %]</td>
+              <td class="muted">[% message.preview %]</td>
+            </tr>
+            [% END %]
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="glass pane">
+      <div class="pane-head">
+        <h3>Message viewer</h3>
+        <div class="actions">
+          <button id="reply-btn" type="button">Reply</button>
+          <button id="mark-read-btn" class="ok" type="button">Mark read</button>
+          <button id="delete-btn" class="danger" type="button">Delete</button>
+        </div>
+      </div>
+      <div class="pane-body">
+        <div id="viewer-meta" class="muted">Select a message from the table to view details.</div>
+        <hr style="border-color:#1c3b63; border-style:solid; border-width:1px 0 0; margin:10px 0;">
+        <div id="viewer-body" class="msg-view"></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="tab-compose" class="tab-pane">
+  <div class="glass pane">
+    <div class="pane-head"><h3>Compose new message</h3></div>
+    <div class="pane-body">
+      <form id="send-form" method="post" enctype="multipart/form-data" action="/messages/send" style="display:grid; gap:10px;">
+        <div class="row">
+          <label>From
+            <select id="compose-from" name="from" required>
+              [% FOREACH person IN people %]<option value="[% person %]">[% person %]</option>[% END %]
+            </select>
+          </label>
+          <label>To
+            <select id="compose-to" name="to" required>
+              [% FOREACH person IN people %]<option value="[% person %]">[% person %]</option>[% END %]
+            </select>
+          </label>
+        </div>
+
+        <label>Message (rich text editor, sent as Markdown)</label>
+        <div class="editor-wrap">
+          <div class="editor-toolbar">
+            <button type="button" class="fmt" data-cmd="bold">Bold</button>
+            <button type="button" class="fmt" data-cmd="italic">Italic</button>
+            <button type="button" class="fmt" data-cmd="insertUnorderedList">Bullet</button>
+            <button type="button" class="fmt" data-cmd="formatBlock" data-value="blockquote">Quote</button>
+            <button type="button" id="clear-compose">Clear</button>
+          </div>
+          <div id="compose-editor" class="editor" contenteditable="true" data-placeholder="Write your message..."></div>
+        </div>
+
+        <textarea id="compose-message" name="message" hidden></textarea>
+        <label>Attachments <input type="file" name="files" multiple></label>
+        <div class="actions">
+          <button class="primary" type="submit">Send message</button>
+          <span id="send-status" class="muted"></span>
+        </div>
+      </form>
+    </div>
+  </div>
+</section>
+
+<section id="tab-admin" class="tab-pane">
+  <div class="glass pane">
+    <div class="pane-head"><h3>Directory management</h3></div>
+    <div class="pane-body">
+      <div class="stats">
+        <span class="pill">Participants: [% people.size %]</span>
+      </div>
+      <form id="add-person-form" method="post" action="/people/add" class="row" style="margin-top:10px;">
+        <label>New username<input name="name" placeholder="e.g. alice" required></label>
+        <div style="display:flex; align-items:end;"><button class="primary" type="submit">Add person</button></div>
+      </form>
+      <ul class="chips" id="people-list" style="margin-top:14px; padding:0; list-style:none; display:flex; gap:8px; flex-wrap:wrap;">
+        [% FOREACH person IN people %]
+        <li class="pill" style="display:flex; align-items:center; gap:8px;">
+          <span>[% person %]</span>
+          <button class="danger remove-person" data-name="[% person %]" type="button">Remove</button>
+        </li>
+        [% END %]
+      </ul>
+    </div>
+  </div>
+</section>
+
+<script>
+(() => {
+  const $ = (s, root=document) => root.querySelector(s);
+  const $$ = (s, root=document) => [...root.querySelectorAll(s)];
+
+  // Tabs
+  $$('.tab-btn').forEach(btn => btn.addEventListener('click', () => {
+    $$('.tab-btn').forEach(x => x.classList.remove('active'));
+    $$('.tab-pane').forEach(x => x.classList.remove('active'));
+    btn.classList.add('active');
+    $(`#tab-${btn.dataset.tab}`).classList.add('active');
+  }));
+
+  // Inbox list + pagination + row click view
+  const rows = $$('#message-list .msg-row');
+  const PAGE_SIZE = 12;
+  let page = 1;
+  let selectedPath = null;
+  let selectedMeta = null;
+
+  function renderPage() {
+    const totalPages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
+    page = Math.min(Math.max(1, page), totalPages);
+    rows.forEach((r, i) => {
+      const visible = i >= (page-1)*PAGE_SIZE && i < page*PAGE_SIZE;
+      r.style.display = visible ? '' : 'none';
+    });
+    $('#page-indicator').textContent = `Page ${page} / ${totalPages}`;
+  }
+
+  $('#prev-page')?.addEventListener('click', () => { page--; renderPage(); });
+  $('#next-page')?.addEventListener('click', () => { page++; renderPage(); });
+  renderPage();
+
+  async function loadMessage(row) {
+    rows.forEach(r => r.classList.remove('active'));
+    row.classList.add('active');
+    selectedPath = row.dataset.path;
+    selectedMeta = row.dataset;
+
+    const res = await fetch(`/messages/view?path=${encodeURIComponent(selectedPath)}`);
+    if (!res.ok) {
+      $('#viewer-meta').textContent = 'Failed to load selected message';
+      $('#viewer-body').textContent = '';
+      return;
+    }
+    const m = await res.json();
+    $('#viewer-meta').textContent = `From ${m.sender} → ${m.recipient} | ${m.sent_at}`;
+    $('#viewer-body').textContent = m.body || '(no body)';
+
+    const isNew = row.dataset.isNew === '1';
+    $('#mark-read-btn').style.display = isNew ? '' : 'none';
+    $('#reply-btn').style.display = isNew ? '' : 'none';
+  }
+
+  rows.forEach(r => {
+    r.addEventListener('click', () => loadMessage(r));
+    r.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); loadMessage(r); } });
+  });
+
+  const firstVisible = rows.find(r => r.style.display !== 'none');
+  if (firstVisible) loadMessage(firstVisible);
+
+  async function postAction(endpoint, payload) {
+    const res = await fetch(endpoint, {
+      method:'POST',
+      headers:{'Content-Type':'application/x-www-form-urlencoded'},
+      body:new URLSearchParams(payload)
+    });
+    return res.ok;
+  }
+
+  $('#delete-btn')?.addEventListener('click', async () => {
+    if (!selectedPath) return;
+    if (await postAction('/messages/delete', { path:selectedPath })) location.reload();
+  });
+
+  $('#mark-read-btn')?.addEventListener('click', async () => {
+    if (!selectedPath) return;
+    if (await postAction('/messages/archive', { path:selectedPath })) location.reload();
+  });
+
+  // Rich text editor => markdown for send
+  const editor = $('#compose-editor');
+  const hiddenMd = $('#compose-message');
+
+  function htmlToMarkdown(rootEl) {
+    const walk = (node) => {
+      if (node.nodeType === Node.TEXT_NODE) return node.textContent;
+      if (node.nodeType !== Node.ELEMENT_NODE) return '';
+      const tag = node.tagName.toLowerCase();
+      const inner = [...node.childNodes].map(walk).join('');
+      if (tag === 'b' || tag === 'strong') return `**${inner}**`;
+      if (tag === 'i' || tag === 'em') return `_${inner}_`;
+      if (tag === 'blockquote') return inner.split('\n').map(l => `> ${l}`).join('\n');
+      if (tag === 'li') return `- ${inner}\n`;
+      if (tag === 'ul' || tag === 'ol') return `\n${inner}`;
+      if (tag === 'div' || tag === 'p') return `${inner}\n`;
+      if (tag === 'br') return '\n';
+      return inner;
+    };
+    return [...rootEl.childNodes].map(walk).join('').replace(/\n{3,}/g, '\n\n').trim();
+  }
+
+  $$('.fmt').forEach(btn => btn.addEventListener('click', () => {
+    const cmd = btn.dataset.cmd;
+    const value = btn.dataset.value || null;
+    document.execCommand(cmd, false, value);
+    editor.focus();
+  }));
+
+  $('#clear-compose')?.addEventListener('click', () => { editor.innerHTML = ''; editor.focus(); });
+
+  $('#reply-btn')?.addEventListener('click', () => {
+    if (!selectedMeta) return;
+    $('[data-tab="compose"]').click();
+    $('#compose-from').value = selectedMeta.recipient || '';
+    $('#compose-to').value = selectedMeta.sender || '';
+    editor.innerHTML = `<p><br></p><p><br></p><blockquote>Replying to: ${selectedMeta.preview || ''}</blockquote>`;
+    editor.focus();
+  });
+
+  $('#send-form')?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    hiddenMd.value = htmlToMarkdown(editor);
+    if (!hiddenMd.value.trim()) {
+      $('#send-status').textContent = 'Message cannot be empty';
+      return;
+    }
+    $('#send-status').textContent = 'Sending...';
+    const res = await fetch('/messages/send', { method:'POST', body:new FormData(e.currentTarget) });
+    $('#send-status').textContent = res.ok ? 'Delivered ✓' : 'Send failed';
+    if (res.ok) editor.innerHTML = '';
+  });
+
+  // Admin actions by ajax
+  $('#add-person-form')?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const form = e.currentTarget;
+    const res = await fetch(form.action, { method:'POST', body:new FormData(form) });
+    if (res.ok) location.reload();
+  });
+
+  $$('.remove-person').forEach(btn => btn.addEventListener('click', async () => {
+    const res = await fetch('/people/remove', {
+      method:'POST',
+      headers:{'Content-Type':'application/x-www-form-urlencoded'},
+      body:new URLSearchParams({ name: btn.dataset.name })
+    });
+    if (res.ok) location.reload();
+  }));
+})();
+</script>

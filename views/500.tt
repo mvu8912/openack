@@ -1,0 +1,6 @@
+[% layout = 'main' %]
+<section class="panel">
+  <h2>Server error</h2>
+  <p>Something went wrong while processing your request.</p>
+  <a href="/dashboard">Back to dashboard</a>
+</section>
